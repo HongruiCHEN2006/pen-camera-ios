@@ -115,7 +115,7 @@ actor OpenAIExamAnalyzer {
                     "type": "json_schema",
                     "name": "exam_capture_result",
                     "strict": true,
-                    "schema": resultSchema
+                    "schema": makeResultSchema()
                 ]
             ]
         ]
@@ -162,37 +162,39 @@ actor OpenAIExamAnalyzer {
     Preserve the language and mathematical notation from the page as accurately as possible.
     """
 
-    private static let resultSchema: [String: Any] = [
-        "type": "object",
-        "properties": [
-            "questions": [
-                "type": "array",
-                "items": [
-                    "type": "object",
-                    "properties": [
-                        "question_number": ["type": "string"],
-                        "is_clear": ["type": "boolean"],
-                        "options": [
-                            "type": "array",
-                            "items": [
-                                "type": "object",
-                                "properties": [
-                                    "label": ["type": "string"],
-                                    "text": ["type": "string"]
-                                ],
-                                "required": ["label", "text"],
-                                "additionalProperties": false
+    private static func makeResultSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "questions": [
+                    "type": "array",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "question_number": ["type": "string"],
+                            "is_clear": ["type": "boolean"],
+                            "options": [
+                                "type": "array",
+                                "items": [
+                                    "type": "object",
+                                    "properties": [
+                                        "label": ["type": "string"],
+                                        "text": ["type": "string"]
+                                    ],
+                                    "required": ["label", "text"],
+                                    "additionalProperties": false
+                                ]
                             ]
-                        ]
-                    ],
-                    "required": ["question_number", "is_clear", "options"],
-                    "additionalProperties": false
+                        ],
+                        "required": ["question_number", "is_clear", "options"],
+                        "additionalProperties": false
+                    ]
                 ]
-            ]
-        ],
-        "required": ["questions"],
-        "additionalProperties": false
-    ]
+            ],
+            "required": ["questions"],
+            "additionalProperties": false
+        ]
+    }
 
     private struct ResponseEnvelope: Decodable {
         let output: [OutputItem]
