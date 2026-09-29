@@ -10,11 +10,10 @@ D7WN live JPEG -> copy current complete frame -> OpenAI Responses API -> result 
 
 The analysis reports only:
 
-1. Printed question number.
-2. Whether the question and its options were read clearly.
-3. Visible option labels and text.
+1. Whether at least one complete question was read successfully, as exactly one Chinese character: `是` or `否`.
+2. If the result is `是`, the final answer for every complete visible question, identified by question number when multiple questions are present.
 
-It does not solve the question or select an answer.
+It does not transcribe the questions, options, or reasoning steps.
 
 ## Implementation
 
@@ -23,14 +22,14 @@ It does not solve the question or select an answer.
 - The model name is configurable; the initial default is `gpt-4o-mini`.
 - A button press copies one complete in-memory JPEG and also saves that exact frame locally.
 - The JPEG is sent as a Base64 data URL in a Responses API `input_image` item with `detail: high`.
-- `text.format` uses a strict JSON Schema for question number, clarity, and options.
+- `text.format` uses a strict JSON Schema for the `是`/`否` read status and final-answer string.
 - The request sets `store: false`.
 - Build 0.4 used URLSession with cellular access allowed. Physical testing verified that this did not force cellular: iOS eventually selected the camera AP as the default public route and the upload failed.
 - Build 0.5 replaces URLSession transport with a Network.framework TLS/TCP connection whose required interface type is cellular.
 - The camera TCP connection separately requires Wi-Fi.
 - Cloud requests never fall back to Wi-Fi. If a cellular path is unavailable, analysis fails explicitly.
 - The app verifies `NWConnection.currentPath` before sending and displays the verified route.
-- The result screen shows the captured image, progress, structured questions, errors, and retry for the same frame.
+- The result screen shows the captured image, `是`/`否`, final answers when readable, errors, and retry for the same frame.
 
 Official references:
 
@@ -42,14 +41,14 @@ Official references:
 
 - **VERIFIED on build 0.4**: an OpenAI request succeeds after Wi-Fi is disabled and the phone switches to cellular.
 - **VERIFIED on build 0.4**: merely allowing cellular in URLSession does not keep the upload on cellular while the D7WN AP remains joined.
-- **VERIFIED after build 0.5 CI passes**: request construction, image encoding, route-policy construction, HTTP/1.1 encoding, Content-Length/chunked response parsing, Swift compilation, and unsigned IPA packaging.
-- **UNKNOWN until build 0.5 physical test**: a cellular-bound Network.framework connection reaches OpenAI while the camera remains live over Wi-Fi.
-- **UNKNOWN**: the physical worksheet image is sharp enough to read all intended questions and options.
-- **OUT OF SCOPE**: solving questions and Huawei Watch triggering.
+- **VERIFIED on build 0.5**: a cellular-bound Network.framework connection reaches OpenAI while the camera remains live over Wi-Fi.
+- **VERIFIED after build 0.6 CI passes**: the strict `是`/`否` and final-answer response schema compiles and passes parsing tests.
+- **UNKNOWN until build 0.6 physical test**: answer accuracy and image readability on real worksheet captures.
+- **OUT OF SCOPE**: Huawei Watch triggering.
 
 ## Physical test
 
-1. Install build 0.5.0 and join `Nax_5cf097da7367` with cellular data enabled.
+1. Install build 0.6.0 and join `Nax_5cf097da7367` with cellular data enabled.
 2. Open the key icon, enter an OpenAI API Key, and save.
 3. Start live video and place a worksheet in view.
 4. Tap **CAPTURE & ANALYZE**.
@@ -57,4 +56,4 @@ Official references:
 6. Wait until iOS shows the Wi-Fi icon, then run another analysis without disconnecting from the AP.
 7. Confirm the app shows `Camera route: Wi-Fi (verified)` and `Cloud route: Cellular (verified)`.
 8. Disable cellular data and retry. Confirm analysis fails explicitly instead of using Wi-Fi.
-9. Compare every reported question number, clarity flag, and option against the page.
+9. Confirm the result is exactly `是` or `否`; when it is `是`, compare every final answer against the page.

@@ -46,11 +46,15 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(format["strict"] as? Bool, true)
         let schema = try XCTUnwrap(format["schema"] as? [String: Any])
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let readSuccess = try XCTUnwrap(properties["read_success"] as? [String: Any])
+        XCTAssertEqual(readSuccess["enum"] as? [String], ["是", "否"])
+        XCTAssertNotNil(properties["answer"])
     }
 
-    func testParsesStructuredQuestionResult() throws {
+    func testParsesSuccessfulAnswerResult() throws {
         let structuredResult = """
-        {"questions":[{"question_number":"12","is_clear":true,"options":[{"label":"A","text":"3x + 1"},{"label":"B","text":"4x - 2"}]}]}
+        {"read_success":"是","answer":"12. B；13. 42"}
         """
         let envelope: [String: Any] = [
             "output": [
@@ -66,10 +70,45 @@ final class ExamAnalysisTests: XCTestCase {
 
         let result = try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)
 
-        XCTAssertEqual(result.questions.count, 1)
-        XCTAssertEqual(result.questions[0].questionNumber, "12")
-        XCTAssertTrue(result.questions[0].isClear)
-        XCTAssertEqual(result.questions[0].options[1], ExamOption(label: "B", text: "4x - 2"))
+        XCTAssertEqual(result.readSuccess, .yes)
+        XCTAssertEqual(result.answer, "12. B；13. 42")
+    }
+
+    func testParsesUnreadableResultWithEmptyAnswer() throws {
+        let structuredResult = #"{"read_success":"否","answer":""}"#
+        let envelope: [String: Any] = [
+            "output": [
+                [
+                    "type": "message",
+                    "content": [
+                        ["type": "output_text", "text": structuredResult]
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+
+        let result = try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)
+
+        XCTAssertEqual(result.readSuccess, .no)
+        XCTAssertEqual(result.answer, "")
+    }
+
+    func testRejectsSuccessfulReadWithoutAnswer() throws {
+        let envelope: [String: Any] = [
+            "output": [
+                [
+                    "content": [
+                        ["type": "output_text", "text": #"{"read_success":"是","answer":""}"#]
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)) { error in
+            XCTAssertEqual(error as? OpenAIExamError, .malformedStructuredOutput)
+        }
     }
 
     func testParsesOpenAIErrorMessageWithoutLeakingRequestKey() throws {
@@ -87,7 +126,7 @@ final class ExamAnalysisTests: XCTestCase {
             "output": [
                 [
                     "content": [
-                        ["type": "output_text", "text": "not JSON"]
+                        ["type": "output_text", "text": #"{"read_success":"yes","answer":"A"}"#]
                     ]
                 ]
             ]

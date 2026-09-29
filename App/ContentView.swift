@@ -150,7 +150,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Output: question number, whether it was read clearly, and visible answer options. It does not solve the question.")
+                Text("Output: one-character read status (是/否), and final answers only when the status is 是.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

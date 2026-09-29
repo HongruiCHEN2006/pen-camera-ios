@@ -27,7 +27,7 @@ struct AnalysisResultView: View {
                     VStack(spacing: 14) {
                         ProgressView()
                             .controlSize(.large)
-                        Text("Reading question numbers and options…")
+                        Text("Reading and solving the visible questions…")
                             .font(.headline)
                         Text("Do not close the app while the request is running.")
                             .font(.caption)
@@ -59,58 +59,42 @@ struct AnalysisResultView: View {
 
     @ViewBuilder
     private func resultContent(_ result: ExamAnalysisResult) -> some View {
-        if result.questions.isEmpty {
-            ContentUnavailableView(
-                "No Questions Found",
-                systemImage: "questionmark.square.dashed",
-                description: Text("Try moving the page closer, improving focus, or changing the angle.")
+        HStack {
+            Label(
+                result.readSuccess == .yes ? "读取成功" : "读取失败",
+                systemImage: result.readSuccess == .yes ? "checkmark.circle.fill" : "eye.slash.fill"
             )
-        } else {
-            HStack {
-                Label("\(result.questions.count) question(s)", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Spacer()
-                Text(controller.model)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-
-            ForEach(Array(result.questions.enumerated()), id: \.offset) { _, question in
-                questionCard(question)
-            }
+            .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
+            Spacer()
+            Text(controller.model)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
         }
-    }
 
-    private func questionCard(_ question: ExamQuestion) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Question \(question.questionNumber)")
-                        .font(.title3.bold())
+                HStack {
+                    Text("题目是否读取成功")
+                        .font(.headline)
                     Spacer()
-                    Label(
-                        question.isClear ? "Clear" : "Not fully clear",
-                        systemImage: question.isClear ? "eye.fill" : "eye.slash.fill"
-                    )
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(question.isClear ? .green : .orange)
+                    Text(result.readSuccess.rawValue)
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
                 }
 
-                if question.options.isEmpty {
-                    Text("No answer options were identified.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                Divider()
+
+                if result.readSuccess == .yes {
+                    Text("答案")
+                        .font(.headline)
+                    Text(result.answer)
+                        .font(.title2.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
                 } else {
-                    ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
-                        HStack(alignment: .top, spacing: 10) {
-                            Text(option.label)
-                                .font(.headline.monospaced())
-                                .frame(minWidth: 24, alignment: .leading)
-                            Text(option.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        }
-                    }
+                    Text("请调整距离、对焦或角度后重新截取。")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -2,7 +2,7 @@
 
 Native iPhone companion app for the D7WN Wi-Fi camera pen.
 
-The repository is currently implementing **Phase 4**: capture the newest complete live JPEG, send it to the OpenAI Responses API over a cellular-only connection, and display structured exam-question reading results on iPhone. Native AP-mode live video and local capture are verified on the physical phone.
+The repository is currently implementing **Phase 4**: capture the newest complete live JPEG, send it to the OpenAI Responses API over a cellular-only connection, and display whether the questions were read successfully plus their final answers. Native AP-mode live video, local capture, and simultaneous Wi-Fi/cellular split routing are verified on the physical phone.
 
 ## Verified hardware baseline
 
