@@ -61,10 +61,10 @@ struct AnalysisResultView: View {
     private func resultContent(_ result: ExamAnalysisResult) -> some View {
         HStack {
             Label(
-                result.readSuccess == .yes ? "读取成功" : "读取失败",
-                systemImage: result.readSuccess == .yes ? "checkmark.circle.fill" : "eye.slash.fill"
+                result.questions.isEmpty ? "没有确定的题目" : "读取成功",
+                systemImage: result.questions.isEmpty ? "eye.slash.fill" : "checkmark.circle.fill"
             )
-            .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
+            .foregroundStyle(result.questions.isEmpty ? .orange : .green)
             Spacer()
             Text(controller.model)
                 .font(.caption.monospaced())
@@ -73,23 +73,23 @@ struct AnalysisResultView: View {
 
         GroupBox {
             HStack {
-                Text("题目是否读取成功")
+                Text("确定的题目")
                     .font(.headline)
                 Spacer()
-                Text(result.readSuccess.rawValue)
+                Text("\(result.questions.count)")
                     .font(.largeTitle.bold())
-                    .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
+                    .foregroundStyle(result.questions.isEmpty ? .orange : .green)
             }
             .padding(.top, 5)
         }
 
-        if result.completeQuestions.isEmpty {
+        if result.questions.isEmpty {
             Text("请调整距离、对焦或角度后重新截取。")
                 .font(.body)
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(result.completeQuestions) { question in
-                GroupBox("题目 \(question.questionNumber)") {
+            ForEach(result.questions) { question in
+                GroupBox("\(question.questionNumber)：\(question.opening)") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("答案")
                             .font(.caption)

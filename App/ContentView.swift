@@ -142,10 +142,18 @@ struct ContentView: View {
                         return
                     }
                     analysis.startContinuous { [weak camera] in
-                        camera?.latestJPEG
+                        guard let camera,
+                              camera.state.isLive,
+                              let jpeg = camera.latestJPEG,
+                              let capturedAt = camera.lastFrameAt else { return nil }
+                        return CameraSample(
+                            jpeg: jpeg,
+                            frameNumber: camera.frameCount,
+                            capturedAt: capturedAt
+                        )
                     }
                 } label: {
-                    Label("Start 3s Analysis", systemImage: "bell.badge.fill")
+                    Label("Start Batch Capture", systemImage: "bell.badge.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -186,9 +194,10 @@ struct ContentView: View {
                 valueRow("Cloud route", analysis.cloudRoute.title)
                 valueRow("Continuous", analysis.continuousState.title)
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
-                valueRow("Requests", "\(analysis.continuousRequestCount)")
+                valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
+                valueRow("Current images", "\(analysis.capturedFrameCount)")
+                valueRow("Pending batches", "\(analysis.pendingBatchCount)")
                 valueRow("iOS notifications", "\(analysis.notificationCount)")
-                valueRow("Remembered questions", "\(analysis.historyCount)")
                 if let detail = analysis.cloudRoute.detail {
                     Text(detail)
                         .font(.caption)
@@ -210,17 +219,17 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Continuous mode analyzes the newest frame at most once every 3 seconds. Every new complete question creates a real iOS local notification with its question number and answer.")
+                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each confirmed question creates a separate iOS notification.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button("Clear analyzed-question history", role: .destructive) {
-                    analysis.clearQuestionHistory()
+                Button("Retry saved batches") {
+                    analysis.retryPendingBatches()
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(analysis.isContinuousActive || analysis.historyCount == 0)
+                .disabled(!analysis.isContinuousActive || analysis.pendingBatchCount == 0)
 
                 if !analysis.hasStoredAPIKey {
                     Button("Configure API Key") {

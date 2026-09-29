@@ -28,16 +28,13 @@ struct APISettingsView: View {
                 }
 
                 Section("Model") {
-                    TextField("Model", text: $controller.model)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("Default: gpt-4o-mini. You can change this if your OpenAI project uses a different vision-capable model.")
+                    Text("gpt-5.6-luna · high image detail · low reasoning effort")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Network experiment") {
-                    Text("The camera remains on local Wi-Fi. The OpenAI request allows cellular data and waits for an internet route. Whether iOS actually uses cellular while joined to the D7WN AP is verified only by a successful physical request.")
+                    Text("Camera data uses Wi-Fi. OpenAI requests use the cellular connection.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

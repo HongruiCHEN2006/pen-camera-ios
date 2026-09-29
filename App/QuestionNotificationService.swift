@@ -16,8 +16,10 @@ final class QuestionNotificationService: NSObject, UNUserNotificationCenterDeleg
     func requestAuthorization() async throws -> Bool {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
+        case .authorized, .ephemeral:
             return true
+        case .provisional:
+            return false
         case .notDetermined:
             return try await center.requestAuthorization(options: [.alert, .sound])
         case .denied:
@@ -29,7 +31,7 @@ final class QuestionNotificationService: NSObject, UNUserNotificationCenterDeleg
 
     func notify(question: ExamQuestionResult, sequence: Int) async throws {
         let content = UNMutableNotificationContent()
-        content.title = "题目 \(question.questionNumber)"
+        content.title = "\(question.questionNumber)：\(question.opening)"
         content.body = "答案：\(question.answer)"
         content.sound = .default
 
