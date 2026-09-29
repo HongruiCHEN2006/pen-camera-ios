@@ -69,7 +69,16 @@ Apple's free Personal Team provisioning is temporary. Expect the installed app a
 - **VERIFIED**: Sideloadly signs and installs the IPA through USB.
 - **VERIFIED**: the app launches on the iPhone 16 Pro running iOS 26.6.1 and the test button increments.
 
-Until the last two checks are performed on the physical phone, installation compatibility remains **UNKNOWN**.
+Before the physical-device test below, installation compatibility was **UNKNOWN**.
+
+## Physical-device result — 2026-09-29
+
+- **VERIFIED**: GitHub Actions built the unsigned `arm64` IPA with Xcode 26.6 on `macos-26`.
+- **VERIFIED**: Sideloadly signed and installed the IPA over USB with a free Apple Account.
+- **VERIFIED**: the app launched on an iPhone 16 Pro running iOS 26.6.1.
+- **VERIFIED**: the on-screen test-button counter incremented.
+
+Phase 0 is complete. These results do not verify camera networking or video streaming.
 
 ## Explicitly out of scope for Phase 0
 
@@ -78,4 +87,3 @@ Until the last two checks are performed on the physical phone, installation comp
 - cellular upload while joined to the camera AP
 - OpenAI API calls or key storage
 - Huawei Watch communication
-
