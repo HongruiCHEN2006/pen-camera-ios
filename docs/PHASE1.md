@@ -8,7 +8,7 @@ Test one unknown at a time on the physical iPhone. This phase does not claim vid
 
 - **VERIFIED on Windows**: the D7WN AP endpoint is `192.168.169.1:6123`.
 - **VERIFIED on Windows**: the Python client can use this endpoint for live JPEG video.
-- **UNKNOWN on iPhone**: an iOS app can reach this endpoint while joined to `Nax_5cf097da7367`.
+- **VERIFIED on iPhone 16 Pro / iOS 26.6.1**: the native app reached this endpoint while joined to `Nax_5cf097da7367`; the TCP probe succeeded over Wi-Fi at approximately 23 ms.
 
 ## Build 0.2.0 experiment
 
@@ -33,7 +33,6 @@ It does not yet verify:
 - JPEG reconstruction or preview
 - simultaneous cellular upload while connected to the camera AP
 
-## Next gate
+## Result and next gate
 
-Only after the TCP probe succeeds will the protocol encoder and response parser be ported from the verified Python implementation.
-
+The TCP probe succeeded. This unlocks combined Phases 2 and 3: native protocol handshake, stream packet parsing, JPEG reconstruction, preview, and capture. It does not by itself verify those later functions.
