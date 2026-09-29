@@ -72,33 +72,36 @@ struct AnalysisResultView: View {
         }
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("题目是否读取成功")
-                        .font(.headline)
-                    Spacer()
-                    Text(result.readSuccess.rawValue)
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
-                }
+            HStack {
+                Text("题目是否读取成功")
+                    .font(.headline)
+                Spacer()
+                Text(result.readSuccess.rawValue)
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(result.readSuccess == .yes ? .green : .orange)
+            }
+            .padding(.top, 5)
+        }
 
-                Divider()
-
-                if result.readSuccess == .yes {
-                    Text("答案")
-                        .font(.headline)
-                    Text(result.answer)
-                        .font(.title2.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                } else {
-                    Text("请调整距离、对焦或角度后重新截取。")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+        if result.completeQuestions.isEmpty {
+            Text("请调整距离、对焦或角度后重新截取。")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(result.completeQuestions) { question in
+                GroupBox("题目 \(question.questionNumber)") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("答案")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(question.answer)
+                            .font(.title2.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.top, 5)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 5)
         }
     }
 }

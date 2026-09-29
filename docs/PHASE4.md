@@ -42,8 +42,8 @@ Official references:
 - **VERIFIED on build 0.4**: an OpenAI request succeeds after Wi-Fi is disabled and the phone switches to cellular.
 - **VERIFIED on build 0.4**: merely allowing cellular in URLSession does not keep the upload on cellular while the D7WN AP remains joined.
 - **VERIFIED on build 0.5**: a cellular-bound Network.framework connection reaches OpenAI while the camera remains live over Wi-Fi.
-- **VERIFIED after build 0.6 CI passes**: the strict `是`/`否` and final-answer response schema compiles and passes parsing tests.
-- **UNKNOWN until build 0.6 physical test**: answer accuracy and image readability on real worksheet captures.
+- **VERIFIED on build 0.6**: the strict `是`/`否` response, real worksheet capture, answer display, and simultaneous live camera plus cellular analysis work on the physical phone.
+- **UNKNOWN**: answer accuracy across a broad range of worksheet layouts and image conditions.
 - **OUT OF SCOPE**: Huawei Watch triggering.
 
 ## Physical test

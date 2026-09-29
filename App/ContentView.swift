@@ -41,6 +41,9 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {
+                    analysis.stopContinuous(
+                        message: "Continuous analysis stopped because the app moved to the background."
+                    )
                     camera.stopStream()
                 }
             }
@@ -97,6 +100,9 @@ struct ContentView: View {
                 .disabled(!camera.canStart)
 
                 Button(role: .destructive) {
+                    analysis.stopContinuous(
+                        message: "Continuous analysis stopped with the camera stream."
+                    )
                     camera.stopStream()
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
@@ -123,7 +129,42 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.orange)
-            .disabled(camera.latestJPEG == nil || analysis.isAnalyzing)
+            .disabled(
+                camera.latestJPEG == nil
+                    || analysis.isAnalyzing
+                    || analysis.isContinuousActive
+            )
+
+            HStack {
+                Button {
+                    guard analysis.hasStoredAPIKey else {
+                        showsAnalysisSettings = true
+                        return
+                    }
+                    analysis.startContinuous { [weak camera] in
+                        camera?.latestJPEG
+                    }
+                } label: {
+                    Label("Start 3s Analysis", systemImage: "bell.badge.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(
+                    camera.latestJPEG == nil
+                        || analysis.isAnalyzing
+                        || analysis.isContinuousActive
+                )
+
+                Button(role: .destructive) {
+                    analysis.stopContinuous()
+                } label: {
+                    Label("Stop Analysis", systemImage: "stop.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!analysis.isContinuousActive)
+            }
 
             Button {
                 camera.captureLatest()
@@ -143,6 +184,11 @@ struct ContentView: View {
                 valueRow("Model", analysis.model)
                 valueRow("Camera route", camera.routeStatus)
                 valueRow("Cloud route", analysis.cloudRoute.title)
+                valueRow("Continuous", analysis.continuousState.title)
+                valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
+                valueRow("Requests", "\(analysis.continuousRequestCount)")
+                valueRow("iOS notifications", "\(analysis.notificationCount)")
+                valueRow("Remembered questions", "\(analysis.historyCount)")
                 if let detail = analysis.cloudRoute.detail {
                     Text(detail)
                         .font(.caption)
@@ -150,10 +196,31 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Output: one-character read status (是/否), and final answers only when the status is 是.")
+                if let detail = analysis.continuousState.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                if let message = analysis.lastContinuousMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                Text("Continuous mode analyzes the newest frame at most once every 3 seconds. Every new complete question creates a real iOS local notification with its question number and answer.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button("Clear analyzed-question history", role: .destructive) {
+                    analysis.clearQuestionHistory()
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .disabled(analysis.isContinuousActive || analysis.historyCount == 0)
 
                 if !analysis.hasStoredAPIKey {
                     Button("Configure API Key") {

@@ -49,12 +49,19 @@ final class ExamAnalysisTests: XCTestCase {
         let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
         let readSuccess = try XCTUnwrap(properties["read_success"] as? [String: Any])
         XCTAssertEqual(readSuccess["enum"] as? [String], ["是", "否"])
-        XCTAssertNotNil(properties["answer"])
+        let questions = try XCTUnwrap(properties["questions"] as? [String: Any])
+        XCTAssertEqual(questions["type"] as? String, "array")
+        let items = try XCTUnwrap(questions["items"] as? [String: Any])
+        XCTAssertEqual(items["additionalProperties"] as? Bool, false)
+        XCTAssertEqual(
+            items["required"] as? [String],
+            ["question_number", "is_complete", "question_text", "answer"]
+        )
     }
 
     func testParsesSuccessfulAnswerResult() throws {
         let structuredResult = """
-        {"read_success":"是","answer":"12. B；13. 42"}
+        {"read_success":"是","questions":[{"question_number":"12","is_complete":true,"question_text":"Which value is correct? A. 1 B. 2","answer":"B"}]}
         """
         let envelope: [String: Any] = [
             "output": [
@@ -71,11 +78,13 @@ final class ExamAnalysisTests: XCTestCase {
         let result = try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)
 
         XCTAssertEqual(result.readSuccess, .yes)
-        XCTAssertEqual(result.answer, "12. B；13. 42")
+        XCTAssertEqual(result.completeQuestions.count, 1)
+        XCTAssertEqual(result.completeQuestions.first?.questionNumber, "12")
+        XCTAssertEqual(result.completeQuestions.first?.answer, "B")
     }
 
     func testParsesUnreadableResultWithEmptyAnswer() throws {
-        let structuredResult = #"{"read_success":"否","answer":""}"#
+        let structuredResult = #"{"read_success":"否","questions":[]}"#
         let envelope: [String: Any] = [
             "output": [
                 [
@@ -91,7 +100,7 @@ final class ExamAnalysisTests: XCTestCase {
         let result = try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)
 
         XCTAssertEqual(result.readSuccess, .no)
-        XCTAssertEqual(result.answer, "")
+        XCTAssertTrue(result.questions.isEmpty)
     }
 
     func testRejectsSuccessfulReadWithoutAnswer() throws {
@@ -99,7 +108,45 @@ final class ExamAnalysisTests: XCTestCase {
             "output": [
                 [
                     "content": [
-                        ["type": "output_text", "text": #"{"read_success":"是","answer":""}"#]
+                        ["type": "output_text", "text": #"{"read_success":"是","questions":[{"question_number":"8","is_complete":true,"question_text":"8. 1 + 1 = ?","answer":""}]}"#]
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)) { error in
+            XCTAssertEqual(error as? OpenAIExamError, .malformedStructuredOutput)
+        }
+    }
+
+    func testParsesIncompleteQuestionOnlyWithEmptyAnswer() throws {
+        let structuredResult = #"{"read_success":"否","questions":[{"question_number":"9","is_complete":false,"question_text":"9. The cropped question begins","answer":""}]}"#
+        let envelope: [String: Any] = [
+            "output": [
+                [
+                    "content": [
+                        ["type": "output_text", "text": structuredResult]
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+
+        let result = try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)
+
+        XCTAssertEqual(result.readSuccess, .no)
+        XCTAssertEqual(result.questions.count, 1)
+        XCTAssertFalse(result.questions[0].isComplete)
+    }
+
+    func testRejectsNoReadStatusWhenCompleteQuestionExists() throws {
+        let structuredResult = #"{"read_success":"否","questions":[{"question_number":"4","is_complete":true,"question_text":"4. 2 + 2 = ?","answer":"4"}]}"#
+        let envelope: [String: Any] = [
+            "output": [
+                [
+                    "content": [
+                        ["type": "output_text", "text": structuredResult]
                     ]
                 ]
             ]
@@ -126,7 +173,7 @@ final class ExamAnalysisTests: XCTestCase {
             "output": [
                 [
                     "content": [
-                        ["type": "output_text", "text": #"{"read_success":"yes","answer":"A"}"#]
+                        ["type": "output_text", "text": #"{"read_success":"yes","questions":[]}"#]
                     ]
                 ]
             ]
