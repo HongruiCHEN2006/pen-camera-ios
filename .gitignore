@@ -5,4 +5,4 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 PenCamera.xcodeproj/
-
+Resources/Info.plist
