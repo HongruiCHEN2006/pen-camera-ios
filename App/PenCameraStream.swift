@@ -64,6 +64,7 @@ final class PenCameraStream: ObservableObject {
     @Published private(set) var firmware: String?
     @Published private(set) var lastCaptureName: String?
     @Published private(set) var captureMessage: String?
+    @Published private(set) var routeStatus = "Wi-Fi required"
 
     private let networkQueue = DispatchQueue(label: "com.hongrui.pencamera.live-stream")
     private var connection: NWConnection?
@@ -135,11 +136,12 @@ final class PenCameraStream: ObservableObject {
         jpegAssembler.reset()
         handshakeStep = nil
         state = .connecting
+        routeStatus = "Wi-Fi required"
 
         let connection = NWConnection(
             host: NWEndpoint.Host(Self.cameraHost),
             port: port,
-            using: .tcp
+            using: NetworkRoutePolicy.cameraWiFiParameters()
         )
         self.connection = connection
 
@@ -171,9 +173,17 @@ final class PenCameraStream: ObservableObject {
         case let .waiting(error):
             state = .reconnecting(seconds: reconnectDelay, reason: error.localizedDescription)
         case .ready:
+            guard connection.currentPath?.usesInterfaceType(.wifi) == true else {
+                handleTransportFailure(
+                    "The camera connection was not using Wi-Fi.",
+                    connection: connection
+                )
+                return
+            }
             connectionTimeoutTask?.cancel()
             connectionTimeoutTask = nil
             reconnectDelay = 1
+            routeStatus = "Wi-Fi (verified)"
             receiveNext(on: connection)
             advance(to: .liveMotion, sending: NaxRequestFactory.liveMotion(), on: connection)
         case let .failed(error):
@@ -379,6 +389,7 @@ final class PenCameraStream: ObservableObject {
     }
 
     private func teardown(_ connection: NWConnection) {
+        routeStatus = "Wi-Fi required"
         connectionTimeoutTask?.cancel()
         connectionTimeoutTask = nil
         handshakeTimeoutTask?.cancel()

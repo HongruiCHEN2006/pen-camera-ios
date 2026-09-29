@@ -3,6 +3,17 @@ import XCTest
 @testable import PenCamera
 
 final class ExamAnalysisTests: XCTestCase {
+    func testRoutePoliciesRequireSeparateInterfaces() {
+        XCTAssertEqual(
+            NetworkRoutePolicy.cameraWiFiParameters().requiredInterfaceType,
+            .wifi
+        )
+        XCTAssertEqual(
+            NetworkRoutePolicy.cloudCellularParameters().requiredInterfaceType,
+            .cellular
+        )
+    }
+
     func testRequestUsesResponsesVisionStructuredOutputAndDoesNotStoreResponse() throws {
         let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
         let request = try OpenAIExamAnalyzer.makeRequest(
@@ -85,5 +96,56 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: data, statusCode: 200)) { error in
             XCTAssertEqual(error as? OpenAIExamError, .malformedStructuredOutput)
         }
+    }
+
+    func testCellularHTTPPreparationPreservesOpenAIRequestAndUsesHTTP11() throws {
+        let request = try OpenAIExamAnalyzer.makeRequest(
+            jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+            apiKey: "sk-test-only",
+            model: "gpt-4o-mini"
+        )
+
+        let prepared = try CellularHTTPSClient.prepare(request)
+        let text = try XCTUnwrap(String(data: prepared.bytes, encoding: .utf8))
+        XCTAssertEqual(prepared.host, "api.openai.com")
+        XCTAssertEqual(prepared.port, 443)
+        XCTAssertTrue(text.hasPrefix("POST /v1/responses HTTP/1.1\r\n"))
+        XCTAssertTrue(text.contains("Host: api.openai.com\r\n"))
+        XCTAssertTrue(text.contains("Authorization: Bearer sk-test-only\r\n"))
+        XCTAssertTrue(text.contains("Accept-Encoding: identity\r\n"))
+        XCTAssertTrue(text.contains("Connection: close\r\n"))
+    }
+
+    func testRequestRejectsHeaderInjectionInAPIKey() {
+        XCTAssertThrowsError(
+            try OpenAIExamAnalyzer.makeRequest(
+                jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+                apiKey: "sk-test\r\nInjected: true",
+                model: "gpt-4o-mini"
+            )
+        ) { error in
+            XCTAssertEqual(error as? OpenAIExamError, .invalidAPIKey)
+        }
+    }
+
+    func testParsesIncrementalContentLengthResponse() throws {
+        var parser = CellularHTTPResponseParser(maximumBytes: 1_024)
+        try parser.append(Data("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhe".utf8))
+        XCTAssertNil(try parser.responseIfComplete(connectionComplete: false))
+        try parser.append(Data("llo".utf8))
+
+        let response = try XCTUnwrap(parser.responseIfComplete(connectionComplete: false))
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.body, Data("hello".utf8))
+    }
+
+    func testParsesChunkedResponse() throws {
+        var parser = CellularHTTPResponseParser(maximumBytes: 1_024)
+        let responseBytes = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"
+        try parser.append(Data(responseBytes.utf8))
+
+        let response = try XCTUnwrap(parser.responseIfComplete(connectionComplete: false))
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.body, Data("Wikipedia".utf8))
     }
 }

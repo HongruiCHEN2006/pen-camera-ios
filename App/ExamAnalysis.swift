@@ -1,10 +1,10 @@
 import Foundation
 
-struct ExamAnalysisResult: Codable, Equatable {
+struct ExamAnalysisResult: Codable, Equatable, Sendable {
     let questions: [ExamQuestion]
 }
 
-struct ExamQuestion: Codable, Equatable, Identifiable {
+struct ExamQuestion: Codable, Equatable, Identifiable, Sendable {
     let questionNumber: String
     let isClear: Bool
     let options: [ExamOption]
@@ -18,7 +18,7 @@ struct ExamQuestion: Codable, Equatable, Identifiable {
     }
 }
 
-struct ExamOption: Codable, Equatable, Identifiable {
+struct ExamOption: Codable, Equatable, Identifiable, Sendable {
     let label: String
     let text: String
 
@@ -58,36 +58,26 @@ actor OpenAIExamAnalyzer {
     static let endpoint = URL(string: "https://api.openai.com/v1/responses")!
     static let defaultModel = "gpt-4o-mini"
 
-    private let session: URLSession
+    private let cellularClient: CellularHTTPSClient
 
-    init(session: URLSession = OpenAIExamAnalyzer.makeSession()) {
-        self.session = session
+    init(cellularClient: CellularHTTPSClient = CellularHTTPSClient()) {
+        self.cellularClient = cellularClient
     }
 
     func analyze(jpeg: Data, apiKey: String, model: String) async throws -> ExamAnalysisResult {
         let request = try Self.makeRequest(jpeg: jpeg, apiKey: apiKey, model: model)
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw OpenAIExamError.invalidHTTPResponse
-        }
-        return try Self.parseResponse(data: data, statusCode: httpResponse.statusCode)
-    }
-
-    static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = true
-        configuration.allowsCellularAccess = true
-        configuration.allowsExpensiveNetworkAccess = true
-        configuration.allowsConstrainedNetworkAccess = true
-        configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 120
-        return URLSession(configuration: configuration)
+        let response = try await cellularClient.send(request)
+        return try Self.parseResponse(data: response.body, statusCode: response.statusCode)
     }
 
     static func makeRequest(jpeg: Data, apiKey: String, model: String) throws -> URLRequest {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty else { throw OpenAIExamError.invalidAPIKey }
+        guard !cleanKey.isEmpty,
+              !cleanKey.contains("\r"),
+              !cleanKey.contains("\n") else {
+            throw OpenAIExamError.invalidAPIKey
+        }
         guard !cleanModel.isEmpty else { throw OpenAIExamError.invalidModel }
 
         let imageURL = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"

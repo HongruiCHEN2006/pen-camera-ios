@@ -4,6 +4,27 @@ import UIKit
 
 @MainActor
 final class ExamAnalysisController: ObservableObject {
+    enum CloudRoute: Equatable {
+        case cellularRequired
+        case connecting
+        case cellularVerified
+        case failed(String)
+
+        var title: String {
+            switch self {
+            case .cellularRequired: "Cellular required"
+            case .connecting: "Connecting via Cellular"
+            case .cellularVerified: "Cellular (verified)"
+            case .failed: "Cellular unavailable"
+            }
+        }
+
+        var detail: String? {
+            if case let .failed(message) = self { return message }
+            return nil
+        }
+    }
+
     enum Phase: Equatable {
         case idle
         case analyzing
@@ -14,6 +35,7 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var capturedImage: UIImage?
     @Published private(set) var hasStoredAPIKey = false
+    @Published private(set) var cloudRoute: CloudRoute = .cellularRequired
     @Published var apiKeyDraft = ""
     @Published var model: String
     @Published private(set) var settingsMessage: String?
@@ -93,14 +115,29 @@ final class ExamAnalysisController: ObservableObject {
         }
 
         let selectedModel = model
+        cloudRoute = .connecting
         analysisTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let result = try await analyzer.analyze(jpeg: jpeg, apiKey: key, model: selectedModel)
                 guard !Task.isCancelled else { return }
+                cloudRoute = .cellularVerified
                 phase = .succeeded(result)
             } catch is CancellationError {
                 return
+            } catch let error as CellularHTTPError {
+                guard !Task.isCancelled else { return }
+                cloudRoute = .failed(error.localizedDescription)
+                phase = .failed(error.localizedDescription)
+            } catch let error as OpenAIExamError {
+                guard !Task.isCancelled else { return }
+                switch error {
+                case .api, .refusal, .missingOutput, .malformedStructuredOutput:
+                    cloudRoute = .cellularVerified
+                case .invalidAPIKey, .invalidModel, .invalidHTTPResponse:
+                    cloudRoute = .cellularRequired
+                }
+                phase = .failed(error.localizedDescription)
             } catch {
                 guard !Task.isCancelled else { return }
                 phase = .failed(error.localizedDescription)

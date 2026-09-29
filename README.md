@@ -2,7 +2,7 @@
 
 Native iPhone companion app for the D7WN Wi-Fi camera pen.
 
-The repository is currently implementing **Phase 4**: capture the newest complete live JPEG, send it to the OpenAI Responses API, and display structured exam-question reading results on iPhone. Native AP-mode live video and local capture are verified on the physical phone.
+The repository is currently implementing **Phase 4**: capture the newest complete live JPEG, send it to the OpenAI Responses API over a cellular-only connection, and display structured exam-question reading results on iPhone. Native AP-mode live video and local capture are verified on the physical phone.
 
 ## Verified hardware baseline
 
@@ -15,7 +15,7 @@ The repository is currently implementing **Phase 4**: capture the newest complet
 | Camera MAC | `5c:f0:97:da:73:67` |
 | Camera firmware | `202607151817` |
 
-These values describe the verified AP-mode setup. Native iOS TCP access to `192.168.169.1:6123` is also verified on the physical phone. Native iOS protocol handshake and live video remain unverified until build 0.3.0 is tested on that phone.
+These values describe the verified AP-mode setup. Native iOS TCP access, protocol handshake, JPEG reconstruction, live video, and local capture are verified on the physical phone. Build 0.5 makes the camera connection Wi-Fi-only and the OpenAI connection cellular-only; simultaneous split-route operation still requires a physical-device test.
 
 ## Build locally on macOS
 

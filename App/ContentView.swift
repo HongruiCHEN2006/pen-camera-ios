@@ -141,6 +141,15 @@ struct ContentView: View {
             VStack(spacing: 10) {
                 valueRow("API Key", analysis.hasStoredAPIKey ? "Stored in Keychain" : "Not configured")
                 valueRow("Model", analysis.model)
+                valueRow("Camera route", camera.routeStatus)
+                valueRow("Cloud route", analysis.cloudRoute.title)
+                if let detail = analysis.cloudRoute.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
                 Text("Output: question number, whether it was read clearly, and visible answer options. It does not solve the question.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

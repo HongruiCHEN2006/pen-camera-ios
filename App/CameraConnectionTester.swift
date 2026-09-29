@@ -67,7 +67,7 @@ final class CameraConnectionTester: ObservableObject {
         let connection = NWConnection(
             host: NWEndpoint.Host(Self.cameraHost),
             port: port,
-            using: .tcp
+            using: NetworkRoutePolicy.cameraWiFiParameters()
         )
 
         self.connection = connection
@@ -148,4 +148,3 @@ final class CameraConnectionTester: ObservableObject {
         startedAt = nil
     }
 }
-
