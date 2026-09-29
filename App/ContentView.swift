@@ -13,6 +13,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     preview
+                    detectionPanel
                     streamControls
                     analysisStatus
                     streamDetails
@@ -84,6 +85,37 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(12)
+        }
+    }
+
+    private var detectionPanel: some View {
+        GroupBox("画面检测与上传判定") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: analysis.continuousState == .recording
+                          ? "record.circle.fill" : "eye.fill")
+                        .foregroundStyle(analysis.continuousState == .recording ? .green : .orange)
+                    Text(analysis.continuousState.title)
+                        .font(.headline)
+                }
+                valueRow("当前画面", analysis.frameJudgement)
+                valueRow("最近检测", analysis.lastCheckAt?.formatted(
+                    date: .omitted, time: .standard
+                ) ?? "尚未检测")
+                valueRow("黑屏确认", "\(analysis.blackConfirmationCount)/2")
+                valueRow("本批已保存", "\(analysis.capturedFrameCount) 张")
+                valueRow("最近结束批次", "\(analysis.lastBatchFrameCount) 张")
+                Divider()
+                Text("准备向 OpenAI 上传？")
+                    .font(.subheadline.weight(.semibold))
+                Text(analysis.uploadDecision)
+                    .font(.headline)
+                    .foregroundStyle(analysis.uploadDecision.hasPrefix("是") ? Color.green : Color.secondary)
+                valueRow("上传进度", analysis.uploadStage)
+                valueRow("等待上传", "\(analysis.pendingBatchCount) 批")
+            }
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

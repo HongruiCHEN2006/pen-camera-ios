@@ -72,6 +72,12 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var capturedFrameCount = 0
     @Published private(set) var pendingBatchCount = 0
     @Published private(set) var continuousRequestInFlight = false
+    @Published private(set) var frameJudgement = "尚未检测"
+    @Published private(set) var uploadDecision = "否：等待画面"
+    @Published private(set) var uploadStage = "未上传"
+    @Published private(set) var lastCheckAt: Date?
+    @Published private(set) var blackConfirmationCount = 0
+    @Published private(set) var lastBatchFrameCount = 0
     @Published private(set) var lastContinuousMessage: String?
     @Published private(set) var lastContinuousResult: ExamAnalysisResult?
     @Published var apiKeyDraft = ""
@@ -186,6 +192,11 @@ final class ExamAnalysisController: ObservableObject {
         let sessionID = UUID()
         continuousSessionID = sessionID
         continuousState = .requestingNotificationPermission
+        frameJudgement = "等待首次检测"
+        uploadDecision = "否：等待画面"
+        uploadStage = pendingBatches.isEmpty ? "未上传" : "有保存的批次等待上传"
+        lastCheckAt = nil
+        blackConfirmationCount = 0
         lastContinuousMessage = "Waiting for iOS notification permission."
         monitorTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -221,6 +232,10 @@ final class ExamAnalysisController: ObservableObject {
         capturedFrameCount = 0
         continuousRequestInFlight = false
         continuousState = .stopped
+        blackConfirmationCount = 0
+        uploadDecision = pendingBatches.isEmpty
+            ? "否：已停止" : "否：已停止，保存的批次可重试"
+        uploadStage = pendingBatches.isEmpty ? "已停止" : "已停止；批次保留待重试"
         lastContinuousMessage = message
         UIApplication.shared.isIdleTimerDisabled = false
     }
@@ -228,6 +243,8 @@ final class ExamAnalysisController: ObservableObject {
     func retryPendingBatches() {
         guard isContinuousActive, !pendingBatches.isEmpty else { return }
         uploadPaused = false
+        uploadDecision = "是：重试 \(pendingBatches.count) 个已保存批次"
+        uploadStage = "准备重新上传"
         guard let sessionID = continuousSessionID else { return }
         startUploadIfNeeded(sessionID: sessionID)
     }
@@ -245,19 +262,31 @@ final class ExamAnalysisController: ObservableObject {
                Date().timeIntervalSince(sample.capturedAt) < 5,
                let black = CameraBlackFrameDetector.isBlack(sample.jpeg) {
                 lastFrameNumber = sample.frameNumber
+                lastCheckAt = Date()
                 if black {
+                    frameJudgement = "黑屏"
                     if currentBatch != nil {
                         blackStreak += 1
+                        blackConfirmationCount = blackStreak
+                        uploadDecision = "否：黑屏确认 \(blackStreak)/2"
                         if blackStreak >= 2 {
                             finishBatch(sessionID: sessionID)
                             blackStreak = 0
+                            blackConfirmationCount = 0
                         }
                     } else {
                         continuousState = .waitingForImage
+                        uploadDecision = pendingBatchCount > 0 || continuousRequestInFlight
+                            ? "是：已有批次进入上传流程" : "否：等待有画面"
                         lastContinuousMessage = "Black frame: waiting for an image."
                     }
                 } else {
+                    frameJudgement = "有画面"
                     blackStreak = 0
+                    blackConfirmationCount = 0
+                    uploadDecision = continuousRequestInFlight
+                        ? "是：上一批上传中；当前批继续采集"
+                        : "否：正在采集，黑屏后上传"
                     do {
                         if currentBatch == nil {
                             currentBatch = try CameraBatchCapture()
@@ -275,7 +304,11 @@ final class ExamAnalysisController: ObservableObject {
                         return
                     }
                 }
-            } else if currentBatch == nil {
+            } else {
+                frameJudgement = "没有新的有效画面"
+                uploadDecision = continuousRequestInFlight
+                    ? "是：已有批次正在上传"
+                    : (currentBatch == nil ? "否：等待画面" : "否：等待新帧或黑屏确认")
                 lastContinuousMessage = "Waiting for a fresh camera frame."
             }
 
@@ -294,6 +327,9 @@ final class ExamAnalysisController: ObservableObject {
         guard !batch.images.isEmpty else { return }
         pendingBatches.append(batch)
         pendingBatchCount = pendingBatches.count
+        lastBatchFrameCount = batch.images.count
+        uploadDecision = "是：黑屏已确认，\(batch.images.count) 张已排队"
+        uploadStage = "准备上传"
         lastContinuousMessage = "Black frame confirmed. Queued \(batch.images.count) images for one API request."
         startUploadIfNeeded(sessionID: sessionID)
     }
@@ -315,6 +351,7 @@ final class ExamAnalysisController: ObservableObject {
                 let key = try loadAPIKey()
                 continuousRequestCount += 1
                 continuousRequestInFlight = true
+                uploadStage = "正在通过蜂窝网络上传 \(images.count) 张"
                 cloudRoute = .connecting
                 let result = try await analyzer.analyze(jpegs: images, apiKey: key, model: model)
                 guard isCurrentSession(sessionID), !Task.isCancelled else { return }
@@ -332,6 +369,10 @@ final class ExamAnalysisController: ObservableObject {
                 notificationProgress.removeValue(forKey: batch.directory)
                 pendingBatchCount = pendingBatches.count
                 try? batch.remove()
+                uploadDecision = pendingBatches.isEmpty
+                    ? (currentBatch == nil ? "否：等待下一批画面" : "否：正在采集下一批")
+                    : "是：还有 \(pendingBatches.count) 个批次排队"
+                uploadStage = "已完成：本批 \(result.questions.count) 道确定的题目"
                 lastContinuousMessage = "Analysis complete: \(result.questions.count) separate iOS notification(s)."
             } catch is CancellationError {
                 return
@@ -351,6 +392,7 @@ final class ExamAnalysisController: ObservableObject {
     private func pauseUpload(_ message: String) {
         continuousRequestInFlight = false
         uploadPaused = true
+        uploadStage = "上传失败：批次已保留"
         lastContinuousMessage = "Upload failed; saved batch can be retried. \(message)"
     }
 
