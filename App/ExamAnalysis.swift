@@ -71,11 +71,12 @@ actor OpenAIExamAnalyzer {
     }
 
     static func makeRequest(jpeg: Data, apiKey: String, model: String) throws -> URLRequest {
+        guard apiKey.rangeOfCharacter(from: .newlines) == nil else {
+            throw OpenAIExamError.invalidAPIKey
+        }
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty,
-              !cleanKey.contains("\r"),
-              !cleanKey.contains("\n") else {
+        guard !cleanKey.isEmpty else {
             throw OpenAIExamError.invalidAPIKey
         }
         guard !cleanModel.isEmpty else { throw OpenAIExamError.invalidModel }
