@@ -34,9 +34,9 @@ enum CameraBlackFrameDetector {
         for index in stride(from: 0, to: pixels.count, by: 4) {
             let brightness = (Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2])) / 3
             brightnessTotal += brightness
-            if brightness < 24 { darkCount += 1 }
+            if brightness < 40 { darkCount += 1 }
         }
-        return darkCount >= 1004 && brightnessTotal / (width * height) < 12
+        return darkCount >= 1004 && brightnessTotal / (width * height) < 28
     }
 }
 
