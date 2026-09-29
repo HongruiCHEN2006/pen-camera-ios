@@ -6,7 +6,6 @@ struct ContentView: View {
     @StateObject private var connectionTester = CameraConnectionTester()
     @StateObject private var analysis = ExamAnalysisController()
     @State private var showsAnalysisSettings = false
-    @State private var showsAnalysisResult = false
 
     var body: some View {
         NavigationStack {
@@ -36,9 +35,6 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showsAnalysisSettings) {
                 APISettingsView(controller: analysis)
-            }
-            .navigationDestination(isPresented: $showsAnalysisResult) {
-                AnalysisResultView(controller: analysis)
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {
@@ -89,33 +85,17 @@ struct ContentView: View {
     }
 
     private var detectionPanel: some View {
-        GroupBox("画面检测与上传判定") {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: analysis.continuousState == .recording
-                          ? "record.circle.fill" : "eye.fill")
-                        .foregroundStyle(analysis.continuousState == .recording ? .green : .orange)
-                    Text(analysis.continuousState.title)
-                        .font(.headline)
-                }
-                valueRow("当前画面", analysis.frameJudgement)
-                valueRow("最近检测", analysis.lastCheckAt?.formatted(
-                    date: .omitted, time: .standard
-                ) ?? "尚未检测")
-                valueRow("黑屏确认", "\(analysis.blackConfirmationCount)/2")
-                valueRow("本批已保存", "\(analysis.capturedFrameCount) 张")
-                valueRow("最近结束批次", "\(analysis.lastBatchFrameCount) 张")
-                Divider()
-                Text("准备向 OpenAI 上传？")
-                    .font(.subheadline.weight(.semibold))
-                Text(analysis.uploadDecision)
-                    .font(.headline)
-                    .foregroundStyle(analysis.uploadDecision.hasPrefix("是") ? Color.green : Color.secondary)
-                valueRow("上传进度", analysis.uploadStage)
-                valueRow("等待上传", "\(analysis.pendingBatchCount) 批")
+        GroupBox("本轮检测结果") {
+            VStack(spacing: 12) {
+                valueRow("1. 当前是否黑屏？", analysis.isCurrentFrameBlack.map {
+                    $0 ? "是" : "否"
+                } ?? "待检测")
+                valueRow("2. 是否开始上传？", analysis.hasUploadStarted ? "是" : "否")
+                valueRow("3. 是否结束上传？", analysis.hasUploadFinished
+                    ? "是（\(analysis.uploadOutcome ?? "已完成")）" : "否")
+                valueRow("4. 共计准备上传多少张？", "\(analysis.preparedImageCount) 张")
             }
             .padding(.top, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -143,29 +123,6 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(camera.canStart)
             }
-
-            Button {
-                guard let jpeg = camera.latestJPEG else { return }
-                guard analysis.hasStoredAPIKey else {
-                    showsAnalysisSettings = true
-                    return
-                }
-                camera.captureLatest(jpeg: jpeg)
-                analysis.analyze(jpeg: jpeg)
-                showsAnalysisResult = true
-            } label: {
-                Label("CAPTURE & ANALYZE", systemImage: "viewfinder.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 5)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
-            .disabled(
-                camera.latestJPEG == nil
-                    || analysis.isAnalyzing
-                    || analysis.isContinuousActive
-            )
 
             HStack {
                 Button {
@@ -227,8 +184,7 @@ struct ContentView: View {
                 valueRow("Continuous", analysis.continuousState.title)
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
                 valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
-                valueRow("Current images", "\(analysis.capturedFrameCount)")
-                valueRow("Pending batches", "\(analysis.pendingBatchCount)")
+                valueRow("Current images", "\(analysis.preparedImageCount)")
                 valueRow("iOS notifications", "\(analysis.notificationCount)")
                 if let detail = analysis.cloudRoute.detail {
                     Text(detail)
@@ -255,13 +211,6 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button("Retry saved batches") {
-                    analysis.retryPendingBatches()
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(!analysis.isContinuousActive || analysis.pendingBatchCount == 0)
 
                 if !analysis.hasStoredAPIKey {
                     Button("Configure API Key") {

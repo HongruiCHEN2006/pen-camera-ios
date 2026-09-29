@@ -37,6 +37,7 @@ final class ExamAnalysisController: ObservableObject {
         case requestingNotificationPermission
         case waitingForImage
         case recording
+        case uploading
         case failed(String)
 
         var title: String {
@@ -45,13 +46,14 @@ final class ExamAnalysisController: ObservableObject {
             case .requestingNotificationPermission: "Requesting notification permission"
             case .waitingForImage: "Waiting for image (3s checks)"
             case .recording: "Recording (1s samples)"
+            case .uploading: "Uploading one batch"
             case .failed: "Stopped with error"
             }
         }
 
         var isActive: Bool {
             switch self {
-            case .requestingNotificationPermission, .waitingForImage, .recording: true
+            case .requestingNotificationPermission, .waitingForImage, .recording, .uploading: true
             case .stopped, .failed: false
             }
         }
@@ -69,15 +71,12 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var continuousState: ContinuousState = .stopped
     @Published private(set) var continuousRequestCount = 0
     @Published private(set) var notificationCount = 0
-    @Published private(set) var capturedFrameCount = 0
-    @Published private(set) var pendingBatchCount = 0
     @Published private(set) var continuousRequestInFlight = false
-    @Published private(set) var frameJudgement = "尚未检测"
-    @Published private(set) var uploadDecision = "否：等待画面"
-    @Published private(set) var uploadStage = "未上传"
-    @Published private(set) var lastCheckAt: Date?
-    @Published private(set) var blackConfirmationCount = 0
-    @Published private(set) var lastBatchFrameCount = 0
+    @Published private(set) var isCurrentFrameBlack: Bool?
+    @Published private(set) var hasUploadStarted = false
+    @Published private(set) var hasUploadFinished = false
+    @Published private(set) var preparedImageCount = 0
+    @Published private(set) var uploadOutcome: String?
     @Published private(set) var lastContinuousMessage: String?
     @Published private(set) var lastContinuousResult: ExamAnalysisResult?
     @Published var apiKeyDraft = ""
@@ -93,16 +92,11 @@ final class ExamAnalysisController: ObservableObject {
     private var uploadTask: Task<Void, Never>?
     private var continuousSessionID: UUID?
     private var currentBatch: CameraBatchCapture?
-    private var pendingBatches: [CameraBatchCapture] = []
-    private var uploadPaused = false
-    private var notificationProgress: [URL: Int] = [:]
 
     init(analyzer: OpenAIExamAnalyzer = OpenAIExamAnalyzer()) {
         self.analyzer = analyzer
         notificationService = .shared
         model = OpenAIExamAnalyzer.defaultModel
-        pendingBatches = CameraBatchCapture.recover()
-        pendingBatchCount = pendingBatches.count
         refreshKeyStatus()
     }
 
@@ -192,11 +186,7 @@ final class ExamAnalysisController: ObservableObject {
         let sessionID = UUID()
         continuousSessionID = sessionID
         continuousState = .requestingNotificationPermission
-        frameJudgement = "等待首次检测"
-        uploadDecision = "否：等待画面"
-        uploadStage = pendingBatches.isEmpty ? "未上传" : "有保存的批次等待上传"
-        lastCheckAt = nil
-        blackConfirmationCount = 0
+        resetCycleDisplay()
         lastContinuousMessage = "Waiting for iOS notification permission."
         monitorTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -209,7 +199,6 @@ final class ExamAnalysisController: ObservableObject {
                 }
                 UIApplication.shared.isIdleTimerDisabled = true
                 continuousState = .waitingForImage
-                startUploadIfNeeded(sessionID: sessionID)
                 await monitor(sessionID: sessionID, frameProvider: frameProvider)
             } catch {
                 guard isCurrentSession(sessionID) else { return }
@@ -218,35 +207,19 @@ final class ExamAnalysisController: ObservableObject {
         }
     }
 
-    func stopContinuous(message: String = "Analysis stopped. Unfinished images remain available for retry.") {
+    func stopContinuous(message: String = "Analysis stopped.") {
         continuousSessionID = nil
         monitorTask?.cancel()
         uploadTask?.cancel()
         monitorTask = nil
         uploadTask = nil
-        if let currentBatch, !currentBatch.images.isEmpty {
-            pendingBatches.append(currentBatch)
-        }
+        if let currentBatch { try? currentBatch.remove() }
         currentBatch = nil
-        pendingBatchCount = pendingBatches.count
-        capturedFrameCount = 0
         continuousRequestInFlight = false
         continuousState = .stopped
-        blackConfirmationCount = 0
-        uploadDecision = pendingBatches.isEmpty
-            ? "否：已停止" : "否：已停止，保存的批次可重试"
-        uploadStage = pendingBatches.isEmpty ? "已停止" : "已停止；批次保留待重试"
+        resetCycleDisplay()
         lastContinuousMessage = message
         UIApplication.shared.isIdleTimerDisabled = false
-    }
-
-    func retryPendingBatches() {
-        guard isContinuousActive, !pendingBatches.isEmpty else { return }
-        uploadPaused = false
-        uploadDecision = "是：重试 \(pendingBatches.count) 个已保存批次"
-        uploadStage = "准备重新上传"
-        guard let sessionID = continuousSessionID else { return }
-        startUploadIfNeeded(sessionID: sessionID)
     }
 
     private func monitor(
@@ -262,41 +235,37 @@ final class ExamAnalysisController: ObservableObject {
                Date().timeIntervalSince(sample.capturedAt) < 5,
                let black = CameraBlackFrameDetector.isBlack(sample.jpeg) {
                 lastFrameNumber = sample.frameNumber
-                lastCheckAt = Date()
-                if black {
-                    frameJudgement = "黑屏"
+                isCurrentFrameBlack = black
+                if continuousState == .uploading {
+                    // Update the visible verdict without starting another batch.
+                } else if black {
                     if currentBatch != nil {
                         blackStreak += 1
-                        blackConfirmationCount = blackStreak
-                        uploadDecision = "否：黑屏确认 \(blackStreak)/2"
+                        lastContinuousMessage = "Black confirmation \(blackStreak)/2."
                         if blackStreak >= 2 {
-                            finishBatch(sessionID: sessionID)
+                            let batch = currentBatch!
+                            currentBatch = nil
+                            continuousState = .uploading
+                            lastContinuousMessage = "Black confirmed. Uploading \(batch.images.count) images once."
+                            beginUpload(batch, sessionID: sessionID)
                             blackStreak = 0
-                            blackConfirmationCount = 0
                         }
                     } else {
                         continuousState = .waitingForImage
-                        uploadDecision = pendingBatchCount > 0 || continuousRequestInFlight
-                            ? "是：已有批次进入上传流程" : "否：等待有画面"
                         lastContinuousMessage = "Black frame: waiting for an image."
                     }
                 } else {
-                    frameJudgement = "有画面"
                     blackStreak = 0
-                    blackConfirmationCount = 0
-                    uploadDecision = continuousRequestInFlight
-                        ? "是：上一批上传中；当前批继续采集"
-                        : "否：正在采集，黑屏后上传"
                     do {
                         if currentBatch == nil {
                             currentBatch = try CameraBatchCapture()
-                            capturedFrameCount = 0
                             continuousState = .recording
                         }
-                        if let batch = currentBatch, try batch.append(sample.jpeg) {
-                            capturedFrameCount = batch.images.count
+                        if let batch = currentBatch {
+                            _ = try batch.append(sample.jpeg)
+                            preparedImageCount = batch.images.count
                         }
-                        lastContinuousMessage = "Recording \(capturedFrameCount) image(s) for this batch."
+                        lastContinuousMessage = "Recording \(preparedImageCount) image(s)."
                     } catch BatchCaptureError.limitReached {
                         lastContinuousMessage = BatchCaptureError.limitReached.localizedDescription
                     } catch {
@@ -305,95 +274,89 @@ final class ExamAnalysisController: ObservableObject {
                     }
                 }
             } else {
-                frameJudgement = "没有新的有效画面"
-                uploadDecision = continuousRequestInFlight
-                    ? "是：已有批次正在上传"
-                    : (currentBatch == nil ? "否：等待画面" : "否：等待新帧或黑屏确认")
+                isCurrentFrameBlack = nil
                 lastContinuousMessage = "Waiting for a fresh camera frame."
             }
 
-            let interval: TimeInterval = currentBatch == nil ? 3 : 1
+            let interval: TimeInterval = currentBatch == nil && continuousState != .uploading ? 3 : 1
             let remaining = max(0, interval - Date().timeIntervalSince(started))
             do { try await Task.sleep(for: .milliseconds(Int64(remaining * 1_000))) }
             catch { return }
         }
     }
 
-    private func finishBatch(sessionID: UUID) {
-        guard let batch = currentBatch else { return }
-        currentBatch = nil
-        capturedFrameCount = 0
-        continuousState = .waitingForImage
-        guard !batch.images.isEmpty else { return }
-        pendingBatches.append(batch)
-        pendingBatchCount = pendingBatches.count
-        lastBatchFrameCount = batch.images.count
-        uploadDecision = "是：黑屏已确认，\(batch.images.count) 张已排队"
-        uploadStage = "准备上传"
-        lastContinuousMessage = "Black frame confirmed. Queued \(batch.images.count) images for one API request."
-        startUploadIfNeeded(sessionID: sessionID)
-    }
-
-    private func startUploadIfNeeded(sessionID: UUID) {
-        guard isCurrentSession(sessionID), !uploadPaused,
-              uploadTask == nil, !pendingBatches.isEmpty else { return }
+    private func beginUpload(_ batch: CameraBatchCapture, sessionID: UUID) {
+        guard uploadTask == nil else { return }
         uploadTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await uploadPending(sessionID: sessionID)
+            await uploadBatch(batch, sessionID: sessionID)
+            guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+            do { try await Task.sleep(for: .seconds(5)) }
+            catch { return }
+            guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+            resetCycleDisplay()
+            continuousState = .waitingForImage
+            uploadTask = nil
         }
     }
 
-    private func uploadPending(sessionID: UUID) async {
-        while isCurrentSession(sessionID), !Task.isCancelled,
-              !uploadPaused, let batch = pendingBatches.first {
-            do {
-                let images = try batch.readImages()
-                let key = try loadAPIKey()
-                continuousRequestCount += 1
-                continuousRequestInFlight = true
-                uploadStage = "正在通过蜂窝网络上传 \(images.count) 张"
-                cloudRoute = .connecting
-                let result = try await analyzer.analyze(jpegs: images, apiKey: key, model: model)
+    private func uploadBatch(_ batch: CameraBatchCapture, sessionID: UUID) async {
+        defer { try? batch.remove() }
+        guard !batch.images.isEmpty, isCurrentSession(sessionID) else { return }
+        do {
+            let images = try batch.readImages()
+            let key = try loadAPIKey()
+            guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+            continuousRequestCount += 1
+            continuousRequestInFlight = true
+            hasUploadStarted = true
+            hasUploadFinished = false
+            uploadOutcome = nil
+            cloudRoute = .connecting
+            let result = try await analyzer.analyze(jpegs: images, apiKey: key, model: model)
+            guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+            continuousRequestInFlight = false
+            hasUploadFinished = true
+            cloudRoute = .cellularVerified
+            uploadOutcome = "成功"
+            lastContinuousResult = result
+            for (index, question) in result.questions.enumerated() {
                 guard isCurrentSession(sessionID), !Task.isCancelled else { return }
-                continuousRequestInFlight = false
-                cloudRoute = .cellularVerified
-                lastContinuousResult = result
-                let alreadyNotified = notificationProgress[batch.directory] ?? 0
-                for (index, question) in result.questions.enumerated() where index >= alreadyNotified {
-                    guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+                do {
                     try await notificationService.notify(question: question, sequence: index + 1)
-                    notificationProgress[batch.directory] = index + 1
                     notificationCount += 1
+                } catch {
+                    lastContinuousMessage = "Notification failed: \(error.localizedDescription)"
                 }
-                pendingBatches.removeFirst()
-                notificationProgress.removeValue(forKey: batch.directory)
-                pendingBatchCount = pendingBatches.count
-                try? batch.remove()
-                uploadDecision = pendingBatches.isEmpty
-                    ? (currentBatch == nil ? "否：等待下一批画面" : "否：正在采集下一批")
-                    : "是：还有 \(pendingBatches.count) 个批次排队"
-                uploadStage = "已完成：本批 \(result.questions.count) 道确定的题目"
-                lastContinuousMessage = "Analysis complete: \(result.questions.count) separate iOS notification(s)."
-            } catch is CancellationError {
-                return
-            } catch let error as CellularHTTPError {
-                cloudRoute = .failed(error.localizedDescription)
-                pauseUpload(error.localizedDescription)
-            } catch let error as OpenAIExamError {
-                updateCloudRoute(after: error)
-                pauseUpload(error.localizedDescription)
-            } catch {
-                pauseUpload(error.localizedDescription)
             }
+            lastContinuousMessage = "Upload finished: \(result.questions.count) confirmed question(s)."
+        } catch is CancellationError {
+            return
+        } catch let error as CellularHTTPError {
+            cloudRoute = .failed(error.localizedDescription)
+            markUploadFailed(error.localizedDescription, sessionID: sessionID)
+        } catch let error as OpenAIExamError {
+            updateCloudRoute(after: error)
+            markUploadFailed(error.localizedDescription, sessionID: sessionID)
+        } catch {
+            markUploadFailed(error.localizedDescription, sessionID: sessionID)
         }
-        uploadTask = nil
     }
 
-    private func pauseUpload(_ message: String) {
+    private func markUploadFailed(_ message: String, sessionID: UUID) {
+        guard isCurrentSession(sessionID), !Task.isCancelled else { return }
         continuousRequestInFlight = false
-        uploadPaused = true
-        uploadStage = "上传失败：批次已保留"
-        lastContinuousMessage = "Upload failed; saved batch can be retried. \(message)"
+        hasUploadFinished = hasUploadStarted
+        uploadOutcome = hasUploadStarted ? "失败" : "准备失败"
+        lastContinuousMessage = "Upload failed: \(message)"
+    }
+
+    private func resetCycleDisplay() {
+        isCurrentFrameBlack = nil
+        hasUploadStarted = false
+        hasUploadFinished = false
+        preparedImageCount = 0
+        uploadOutcome = nil
     }
 
     private func failContinuous(_ message: String, sessionID: UUID) {
