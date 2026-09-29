@@ -22,9 +22,9 @@ The JSON byte fixtures in the unit tests were generated with the repository's Py
 - **VERIFIED**: Windows Python can receive D7WN live video through the same AP endpoint and protocol sequence.
 - **VERIFIED**: physical iPhone native TCP access to the AP endpoint succeeds.
 - **VERIFIED after CI passes**: Swift request bytes match Python fixtures; TCP fragmentation and JPEG marker tests pass; the arm64 unsigned IPA builds.
-- **UNKNOWN**: firmware `202607151817` accepts the complete native Swift handshake.
-- **UNKNOWN**: live JPEG frames display correctly and continuously on iPhone.
-- **UNKNOWN**: local capture preserves a real frame on the physical phone.
+- **VERIFIED on iPhone 16 Pro / iOS 26.6.1**: firmware `202607151817` accepts the complete native Swift handshake.
+- **VERIFIED on iPhone 16 Pro / iOS 26.6.1**: live JPEG frames display correctly on iPhone.
+- **VERIFIED on iPhone 16 Pro / iOS 26.6.1**: the on-screen capture button preserves a real current frame.
 - **OUT OF SCOPE**: OpenAI upload, API-key storage, cellular-path verification, and Huawei Watch commands.
 
 ## Physical test

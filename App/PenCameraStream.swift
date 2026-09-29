@@ -98,8 +98,8 @@ final class PenCameraStream: ObservableObject {
         state = .stopped
     }
 
-    func captureLatest() {
-        guard let latestJPEG else {
+    func captureLatest(jpeg requestedJPEG: Data? = nil) {
+        guard let jpeg = requestedJPEG ?? latestJPEG else {
             captureMessage = "No complete JPEG frame is available yet."
             return
         }
@@ -116,7 +116,7 @@ final class PenCameraStream: ObservableObject {
                 appropriateFor: nil,
                 create: true
             )
-            try latestJPEG.write(to: directory.appendingPathComponent(filename), options: .atomic)
+            try jpeg.write(to: directory.appendingPathComponent(filename), options: .atomic)
             lastCaptureName = filename
             captureMessage = "Saved the current complete frame in the app's Documents folder."
         } catch {

@@ -4,6 +4,9 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var camera = PenCameraStream()
     @StateObject private var connectionTester = CameraConnectionTester()
+    @StateObject private var analysis = ExamAnalysisController()
+    @State private var showsAnalysisSettings = false
+    @State private var showsAnalysisResult = false
 
     var body: some View {
         NavigationStack {
@@ -11,6 +14,7 @@ struct ContentView: View {
                 VStack(spacing: 18) {
                     preview
                     streamControls
+                    analysisStatus
                     streamDetails
                     captureDetails
                     tcpDiagnostic
@@ -19,6 +23,22 @@ struct ContentView: View {
                 .padding()
             }
             .navigationTitle("Pen Camera")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showsAnalysisSettings = true
+                    } label: {
+                        Image(systemName: "key.fill")
+                    }
+                    .accessibilityLabel("OpenAI analysis settings")
+                }
+            }
+            .sheet(isPresented: $showsAnalysisSettings) {
+                APISettingsView(controller: analysis)
+            }
+            .navigationDestination(isPresented: $showsAnalysisResult) {
+                AnalysisResultView(controller: analysis)
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {
                     camera.stopStream()
@@ -87,16 +107,54 @@ struct ContentView: View {
             }
 
             Button {
-                camera.captureLatest()
+                guard let jpeg = camera.latestJPEG else { return }
+                guard analysis.hasStoredAPIKey else {
+                    showsAnalysisSettings = true
+                    return
+                }
+                camera.captureLatest(jpeg: jpeg)
+                analysis.analyze(jpeg: jpeg)
+                showsAnalysisResult = true
             } label: {
-                Label("CAPTURE CURRENT FRAME", systemImage: "camera.fill")
+                Label("CAPTURE & ANALYZE", systemImage: "viewfinder.circle.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 5)
             }
             .buttonStyle(.borderedProminent)
             .tint(.orange)
+            .disabled(camera.latestJPEG == nil || analysis.isAnalyzing)
+
+            Button {
+                camera.captureLatest()
+            } label: {
+                Label("Save Frame Only", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
             .disabled(camera.latestJPEG == nil)
+        }
+    }
+
+    private var analysisStatus: some View {
+        GroupBox("OpenAI question reader") {
+            VStack(spacing: 10) {
+                valueRow("API Key", analysis.hasStoredAPIKey ? "Stored in Keychain" : "Not configured")
+                valueRow("Model", analysis.model)
+                Text("Output: question number, whether it was read clearly, and visible answer options. It does not solve the question.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !analysis.hasStoredAPIKey {
+                    Button("Configure API Key") {
+                        showsAnalysisSettings = true
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 6)
         }
     }
 

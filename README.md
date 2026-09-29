@@ -2,7 +2,7 @@
 
 Native iPhone companion app for the D7WN Wi-Fi camera pen.
 
-The repository is currently implementing combined **Phases 2 and 3**: reproduce the verified Python Nax/V720 AP handshake in native Swift, parse the TCP byte stream, rebuild JPEG frames, show live video, and capture the newest complete frame locally.
+The repository is currently implementing **Phase 4**: capture the newest complete live JPEG, send it to the OpenAI Responses API, and display structured exam-question reading results on iPhone. Native AP-mode live video and local capture are verified on the physical phone.
 
 ## Verified hardware baseline
 
@@ -38,7 +38,7 @@ xcodebuild \
   build/package
 ```
 
-The GitHub Actions workflow first runs protocol/JPEG unit tests, then performs these build and packaging steps automatically. See [docs/PHASE0.md](docs/PHASE0.md) for download, signing, and installation instructions and [docs/PHASE2-3.md](docs/PHASE2-3.md) for the live-video experiment.
+The GitHub Actions workflow first runs protocol, JPEG, and OpenAI request/response unit tests, then performs these build and packaging steps automatically. See [docs/PHASE0.md](docs/PHASE0.md) for download, signing, and installation instructions, [docs/PHASE2-3.md](docs/PHASE2-3.md) for the verified live-video pipeline, and [docs/PHASE4.md](docs/PHASE4.md) for the worksheet analysis experiment.
 
 ## Status vocabulary
 

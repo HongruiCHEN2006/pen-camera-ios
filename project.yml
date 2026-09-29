@@ -22,8 +22,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Pen Camera
-        CFBundleShortVersionString: "0.3.0"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.4.0"
+        CFBundleVersion: "4"
         LSRequiresIPhoneOS: true
         NSLocalNetworkUsageDescription: Pen Camera connects directly to the D7WN camera on its local Wi-Fi network.
         UIFileSharingEnabled: true
@@ -36,8 +36,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hongrui.pencamera
         PRODUCT_NAME: PenCamera
-        MARKETING_VERSION: 0.3.0
-        CURRENT_PROJECT_VERSION: 3
+        MARKETING_VERSION: 0.4.0
+        CURRENT_PROJECT_VERSION: 4
   PenCameraTests:
     type: bundle.unit-test
     platform: iOS
