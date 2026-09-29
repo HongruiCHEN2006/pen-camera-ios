@@ -172,7 +172,7 @@ actor OpenAIExamAnalyzer {
             )
         }
 
-        let hasCompleteQuestion = normalizedQuestions.contains(\.isComplete)
+        let hasCompleteQuestion = normalizedQuestions.contains(where: \.isComplete)
         guard (result.readSuccess == .yes) == hasCompleteQuestion else {
             throw OpenAIExamError.malformedStructuredOutput
         }
