@@ -22,8 +22,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Pen Camera
-        CFBundleShortVersionString: "0.12.1"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "0.13.0"
+        CFBundleVersion: "14"
         BGTaskSchedulerPermittedIdentifiers:
           - com.hongrui.pencamera.capture
         LSRequiresIPhoneOS: true
@@ -38,8 +38,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hongrui.pencamera
         PRODUCT_NAME: PenCamera
-        MARKETING_VERSION: 0.12.1
-        CURRENT_PROJECT_VERSION: 13
+        MARKETING_VERSION: 0.13.0
+        CURRENT_PROJECT_VERSION: 14
   PenCameraTests:
     type: bundle.unit-test
     platform: iOS

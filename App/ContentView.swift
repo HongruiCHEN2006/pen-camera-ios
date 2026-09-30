@@ -16,6 +16,7 @@ struct ContentView: View {
                     detectionPanel
                     streamControls
                     analysisStatus
+                    batchResults
                     streamDetails
                     captureDetails
                     tcpDiagnostic
@@ -259,6 +260,35 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var batchResults: some View {
+        if let result = analysis.lastContinuousResult {
+            GroupBox("Latest batch answers") {
+                VStack(alignment: .leading, spacing: 12) {
+                    if result.questions.isEmpty {
+                        Text("No confirmed questions in the latest batch.")
+                    }
+                    ForEach(result.questions) { question in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(question.questionNumber)：\(question.opening)")
+                                .font(.headline)
+                            Text("答案：\(question.displayAnswer)")
+                                .textSelection(.enabled)
+                            if !question.studentAnswer.isEmpty {
+                                Text("你的作答：\(question.studentAnswer)（\(question.answerSource == "answer_sheet" ? "答题卡" : "题面")）")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+            }
         }
     }
 

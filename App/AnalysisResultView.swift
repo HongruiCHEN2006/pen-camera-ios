@@ -98,6 +98,12 @@ struct AnalysisResultView: View {
                             .font(.title2.weight(.semibold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
+                        if !question.studentAnswer.isEmpty {
+                            Text("你的作答：\(question.studentAnswer)（\(question.answerSource == "answer_sheet" ? "答题卡" : "题面")）")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
                     .padding(.top, 5)
                 }
