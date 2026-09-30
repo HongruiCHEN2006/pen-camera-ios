@@ -94,7 +94,7 @@ struct AnalysisResultView: View {
                         Text("答案")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(question.answer)
+                        Text(question.displayAnswer)
                             .font(.title2.weight(.semibold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)

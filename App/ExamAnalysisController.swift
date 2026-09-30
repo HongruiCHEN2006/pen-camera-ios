@@ -92,6 +92,7 @@ final class ExamAnalysisController: ObservableObject {
     private var uploadTask: Task<Void, Never>?
     private var continuousSessionID: UUID?
     private var currentBatch: CameraBatchCapture?
+    var onBatchCompleted: ((Bool) -> Void)?
 
     init(analyzer: OpenAIExamAnalyzer = OpenAIExamAnalyzer()) {
         self.analyzer = analyzer
@@ -220,6 +221,7 @@ final class ExamAnalysisController: ObservableObject {
         resetCycleDisplay()
         lastContinuousMessage = message
         UIApplication.shared.isIdleTimerDisabled = false
+        BackgroundCaptureCoordinator.shared.finish(success: false)
     }
 
     private func monitor(
@@ -264,6 +266,9 @@ final class ExamAnalysisController: ObservableObject {
                         if let batch = currentBatch {
                             _ = try batch.append(sample.jpeg)
                             preparedImageCount = batch.images.count
+                            BackgroundCaptureCoordinator.shared.reportProgress(
+                                imageCount: preparedImageCount, uploading: false
+                            )
                         }
                         lastContinuousMessage = "Recording \(preparedImageCount) image(s)."
                     } catch BatchCaptureError.limitReached {
@@ -287,6 +292,9 @@ final class ExamAnalysisController: ObservableObject {
 
     private func beginUpload(_ batch: CameraBatchCapture, sessionID: UUID) {
         guard uploadTask == nil else { return }
+        BackgroundCaptureCoordinator.shared.reportProgress(
+            imageCount: batch.images.count, uploading: true
+        )
         uploadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await uploadBatch(batch, sessionID: sessionID)
@@ -330,6 +338,7 @@ final class ExamAnalysisController: ObservableObject {
                 }
             }
             lastContinuousMessage = "Upload finished: \(result.questions.count) confirmed question(s)."
+            onBatchCompleted?(true)
         } catch is CancellationError {
             return
         } catch let error as CellularHTTPError {
@@ -349,6 +358,7 @@ final class ExamAnalysisController: ObservableObject {
         hasUploadFinished = hasUploadStarted
         uploadOutcome = hasUploadStarted ? "失败" : "准备失败"
         lastContinuousMessage = "Upload failed: \(message)"
+        onBatchCompleted?(false)
     }
 
     private func resetCycleDisplay() {

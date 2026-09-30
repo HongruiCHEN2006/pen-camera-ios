@@ -5,6 +5,7 @@ struct ContentView: View {
     @StateObject private var camera = PenCameraStream()
     @StateObject private var connectionTester = CameraConnectionTester()
     @StateObject private var analysis = ExamAnalysisController()
+    @ObservedObject private var backgroundCapture = BackgroundCaptureCoordinator.shared
     @State private var showsAnalysisSettings = false
 
     var body: some View {
@@ -36,13 +37,18 @@ struct ContentView: View {
             .sheet(isPresented: $showsAnalysisSettings) {
                 APISettingsView(controller: analysis)
             }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background {
-                    analysis.stopContinuous(
-                        message: "Continuous analysis stopped because the app moved to the background."
-                    )
-                    camera.stopStream()
+            .onAppear {
+                analysis.onBatchCompleted = { [weak camera, weak analysis] success in
+                    guard let camera, let analysis else { return }
+                    if backgroundCapture.isInBackground {
+                        analysis.stopContinuous(message: "Background batch finished; reopen to start another.")
+                        camera.stopStream()
+                    }
+                    backgroundCapture.finish(success: success)
                 }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                backgroundCapture.isInBackground = phase == .background
             }
         }
     }
@@ -141,6 +147,12 @@ struct ContentView: View {
                             capturedAt: capturedAt
                         )
                     }
+                    if analysis.isContinuousActive {
+                        backgroundCapture.start { [weak camera, weak analysis] in
+                            analysis?.stopContinuous(message: "iOS ended the background capture task.")
+                            camera?.stopStream()
+                        }
+                    }
                 } label: {
                     Label("Start Batch Capture", systemImage: "bell.badge.fill")
                         .frame(maxWidth: .infinity)
@@ -182,6 +194,7 @@ struct ContentView: View {
                 valueRow("Camera route", camera.routeStatus)
                 valueRow("Cloud route", analysis.cloudRoute.title)
                 valueRow("Continuous", analysis.continuousState.title)
+                valueRow("Background", backgroundCapture.status)
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
                 valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
                 valueRow("Current images", "\(analysis.preparedImageCount)")
@@ -207,7 +220,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each confirmed question creates a separate iOS notification.")
+                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each confirmed question creates a separate iOS notification. The current batch may continue in the background if iOS accepts the task; iOS can end it at any time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -3,12 +3,12 @@ name: PenCamera
 options:
   minimumXcodeGenVersion: 2.38.0
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "26.0"
 
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
 
@@ -22,8 +22,10 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Pen Camera
-        CFBundleShortVersionString: "0.11.0"
-        CFBundleVersion: "11"
+        CFBundleShortVersionString: "0.12.0"
+        CFBundleVersion: "12"
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.hongrui.pencamera.capture
         LSRequiresIPhoneOS: true
         NSLocalNetworkUsageDescription: Pen Camera connects directly to the D7WN camera on its local Wi-Fi network.
         UIFileSharingEnabled: true
@@ -36,8 +38,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hongrui.pencamera
         PRODUCT_NAME: PenCamera
-        MARKETING_VERSION: 0.11.0
-        CURRENT_PROJECT_VERSION: 11
+        MARKETING_VERSION: 0.12.0
+        CURRENT_PROJECT_VERSION: 12
   PenCameraTests:
     type: bundle.unit-test
     platform: iOS

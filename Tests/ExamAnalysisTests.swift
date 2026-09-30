@@ -40,21 +40,32 @@ final class ExamAnalysisTests: XCTestCase {
         let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
         let questions = try XCTUnwrap(properties["questions"] as? [String: Any])
         let items = try XCTUnwrap(questions["items"] as? [String: Any])
-        XCTAssertEqual(items["required"] as? [String], ["question_number", "opening", "answer"])
+        XCTAssertEqual(items["required"] as? [String], [
+            "question_number", "opening", "answer", "is_multiple_choice", "option_letter", "option_opening"
+        ])
+        let prompt = try XCTUnwrap(content.first?["text"] as? String)
+        XCTAssertTrue(prompt.contains("first TWO words"))
     }
 
     func testParsesConfirmedQuestionsAndRemovesDuplicatesWithinBatch() throws {
-        let text = #"{"questions":[{"question_number":"2","opening":"Find the value","answer":"B"},{"question_number":"x","opening":"求图中阴影面积","answer":"24"},{"question_number":"2","opening":"Find the value","answer":"B"}]}"#
+        let text = #"{"questions":[{"question_number":"2","opening":"Find the value","answer":"","is_multiple_choice":true,"option_letter":"b","option_opening":"cell membrane"},{"question_number":"x","opening":"求图中阴影面积","answer":"24","is_multiple_choice":false,"option_letter":"","option_opening":""},{"question_number":"2","opening":"Find the value","answer":"","is_multiple_choice":true,"option_letter":"B","option_opening":"cell membrane"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(result.questions.count, 2)
         XCTAssertEqual(result.questions[0].questionNumber, "2")
-        XCTAssertEqual(result.questions[0].answer, "B")
+        XCTAssertEqual(result.questions[0].displayAnswer, "B：cell membrane")
         XCTAssertEqual(result.questions[1].questionNumber, "x")
         XCTAssertEqual(result.questions[1].opening, "求图中阴影面积")
     }
 
     func testRejectsMissingAnswer() throws {
-        let text = #"{"questions":[{"question_number":"6","opening":"Solve this equation","answer":""}]}"#
+        let text = #"{"questions":[{"question_number":"6","opening":"Solve this equation","answer":"","is_multiple_choice":false,"option_letter":"","option_opening":""}]}"#
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
+            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
+        }
+    }
+
+    func testRejectsChoiceWithoutOptionOpening() throws {
+        let text = #"{"questions":[{"question_number":"6","opening":"Choose the correct","answer":"","is_multiple_choice":true,"option_letter":"C","option_opening":""}]}"#
         XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
             XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
         }

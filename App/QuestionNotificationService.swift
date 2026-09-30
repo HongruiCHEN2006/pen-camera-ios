@@ -32,7 +32,7 @@ final class QuestionNotificationService: NSObject, UNUserNotificationCenterDeleg
     func notify(question: ExamQuestionResult, sequence: Int) async throws {
         let content = UNMutableNotificationContent()
         content.title = "\(question.questionNumber)：\(question.opening)"
-        content.body = "答案：\(question.answer)"
+        content.body = "答案：\(question.displayAnswer)"
         content.sound = .default
 
         let delay = max(1, sequence)
