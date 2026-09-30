@@ -45,6 +45,7 @@ final class ExamAnalysisTests: XCTestCase {
         ])
         let prompt = try XCTUnwrap(content.first?["text"] as? String)
         XCTAssertTrue(prompt.contains("first TWO words"))
+        XCTAssertTrue(prompt.contains("only ONE word, report that one word"))
     }
 
     func testParsesConfirmedQuestionsAndRemovesDuplicatesWithinBatch() throws {
@@ -69,6 +70,12 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
             XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
         }
+    }
+
+    func testAcceptsOneWordChoice() throws {
+        let text = #"{"questions":[{"question_number":"4","opening":"Which animal flies","answer":"","is_multiple_choice":true,"option_letter":"A","option_opening":"Bird"}]}"#
+        let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
+        XCTAssertEqual(result.questions.first?.displayAnswer, "A：Bird")
     }
 
     func testEmptyConfirmedListIsValid() throws {
