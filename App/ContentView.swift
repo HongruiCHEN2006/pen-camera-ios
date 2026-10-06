@@ -277,12 +277,6 @@ struct ContentView: View {
                                 .font(.headline)
                             Text("答案：\(question.displayAnswer)")
                                 .textSelection(.enabled)
-                            if !question.studentAnswer.isEmpty {
-                                Text("你的作答：\(question.studentAnswer)（\(question.answerSource == "answer_sheet" ? "答题卡" : "题面")）")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
                         }
                     }
                 }
