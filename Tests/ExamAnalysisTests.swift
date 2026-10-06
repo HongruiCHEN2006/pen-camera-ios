@@ -45,9 +45,12 @@ final class ExamAnalysisTests: XCTestCase {
         ])
         let prompt = try XCTUnwrap(content.first?["text"] as? String)
         XCTAssertTrue(prompt.contains("first TWO words"))
-        XCTAssertTrue(prompt.contains("ALL correct option letters"))
+        XCTAssertTrue(prompt.contains("COMPLETE printed text"))
+        XCTAssertTrue(prompt.contains("ALL correct A-E letters"))
         XCTAssertTrue(prompt.contains("FULL canonical answer"))
         XCTAssertTrue(prompt.contains("Do not inspect, extract, compare, or grade"))
+        XCTAssertTrue(prompt.contains("STRICT inclusion threshold"))
+        XCTAssertTrue(prompt.contains("Omit the entire question if any material"))
     }
 
     func testParsesConfirmedQuestionsAndRemovesDuplicatesWithinBatch() throws {
@@ -55,7 +58,7 @@ final class ExamAnalysisTests: XCTestCase {
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(result.questions.count, 2)
         XCTAssertEqual(result.questions[0].questionNumber, "2")
-        XCTAssertEqual(result.questions[0].displayAnswer, "AC（A：cell membrane；C：nuclear envelope）")
+        XCTAssertEqual(result.questions[0].displayAnswer, "AC（A. cell membrane；C. nuclear envelope）")
         XCTAssertEqual(result.questions[1].questionNumber, "x")
         XCTAssertEqual(result.questions[1].opening, "求图中阴影面积")
         XCTAssertEqual(result.questions[1].displayAnswer, "24 平方厘米")
@@ -76,9 +79,25 @@ final class ExamAnalysisTests: XCTestCase {
     }
 
     func testAcceptsOneWordChoice() throws {
-        let text = #"{"questions":[{"question_number":"4","opening":"Which animal flies","question_type":"multiple_choice","correct_answer":"A","choice_previews":[{"letter":"A","opening":"Bird"}]}]}"#
+        let text = #"{"questions":[{"question_number":"4","opening":"Which animal flies","question_type":"single_choice","correct_answer":"A","choice_previews":[{"letter":"A","opening":"Bird"}]}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
-        XCTAssertEqual(result.questions.first?.displayAnswer, "A（A：Bird）")
+        XCTAssertEqual(result.questions.first?.displayAnswer, "A. Bird")
+    }
+
+    func testSingleChoiceKeepsCompleteOptionText() throws {
+        let text = #"{"questions":[{"question_number":"5","opening":"Choose the organelle","question_type":"single_choice","correct_answer":"B","choice_previews":[{"letter":"B","opening":"The mitochondrion produces usable cellular energy"}]}]}"#
+        let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
+        XCTAssertEqual(
+            result.questions.first?.displayAnswer,
+            "B. The mitochondrion produces usable cellular energy"
+        )
+    }
+
+    func testRejectsSingleChoiceWithMoreThanOneLetter() throws {
+        let text = #"{"questions":[{"question_number":"5","opening":"Choose one","question_type":"single_choice","correct_answer":"AB","choice_previews":[{"letter":"A","opening":"First full option"},{"letter":"B","opening":"Second full option"}]}]}"#
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
+            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
+        }
     }
 
     func testKeepsCompleteFillInAnswer() throws {
