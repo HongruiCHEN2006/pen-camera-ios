@@ -46,7 +46,7 @@ final class ExamAnalysisTests: XCTestCase {
         let prompt = try XCTUnwrap(content.first?["text"] as? String)
         XCTAssertTrue(prompt.contains("first TWO words"))
         XCTAssertTrue(prompt.contains("COMPLETE printed text"))
-        XCTAssertTrue(prompt.contains("ALL correct A-E letters"))
+        XCTAssertTrue(prompt.contains("all best-supported A-E letters"))
         XCTAssertTrue(prompt.contains("FULL canonical answer"))
         XCTAssertTrue(prompt.contains("Do not inspect, extract, compare, or grade"))
         XCTAssertTrue(prompt.contains("meaningful best-effort answer"))
