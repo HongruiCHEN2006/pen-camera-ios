@@ -14,6 +14,7 @@ struct ContentView: View {
                 VStack(spacing: 18) {
                     preview
                     detectionPanel
+                    analysisProfilePicker
                     streamControls
                     analysisStatus
                     batchResults
@@ -187,11 +188,32 @@ struct ContentView: View {
         }
     }
 
+    private var analysisProfilePicker: some View {
+        GroupBox("Question category") {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Category", selection: $analysis.analysisProfile) {
+                    ForEach(AnalysisProfile.allCases) { profile in
+                        Text(profile.displayName).tag(profile)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(analysis.isAnalyzing || analysis.isContinuousActive)
+
+                Text(analysis.analysisProfile.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+        }
+    }
+
     private var analysisStatus: some View {
         GroupBox("OpenAI question reader") {
             VStack(spacing: 10) {
                 valueRow("API Key", analysis.hasStoredAPIKey ? "Stored in Keychain" : "Not configured")
                 valueRow("Model", analysis.model)
+                valueRow("Category", analysis.analysisProfile.displayName)
                 valueRow("Camera route", camera.routeStatus)
                 valueRow("Cloud route", analysis.cloudRoute.title)
                 valueRow("Continuous", analysis.continuousState.title)

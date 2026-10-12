@@ -28,7 +28,7 @@ struct APISettingsView: View {
                 }
 
                 Section("Model") {
-                    Text("gpt-5.6-luna · high image detail · low reasoning effort")
+                    Text("gpt-6.1-sol · high image detail · medium reasoning effort")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

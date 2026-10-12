@@ -81,23 +81,36 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var lastContinuousResult: ExamAnalysisResult?
     @Published var apiKeyDraft = ""
     @Published var model: String
+    @Published var analysisProfile: AnalysisProfile {
+        didSet { preferences.set(analysisProfile.rawValue, forKey: Self.profilePreferenceKey) }
+    }
     @Published private(set) var settingsMessage: String?
 
+    private static let profilePreferenceKey = "analysis-profile"
     private let keychain = KeychainStore(service: "com.hongrui.pencamera.openai", account: "api-key")
     private let analyzer: OpenAIExamAnalyzer
     private let notificationService: QuestionNotificationService
+    private let preferences: UserDefaults
     private var capturedJPEG: Data?
     private var analysisTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
     private var continuousSessionID: UUID?
+    private var continuousAnalysisProfile: AnalysisProfile?
     private var currentBatch: CameraBatchCapture?
     var onBatchCompleted: ((Bool) -> Void)?
 
-    init(analyzer: OpenAIExamAnalyzer = OpenAIExamAnalyzer()) {
+    init(
+        analyzer: OpenAIExamAnalyzer = OpenAIExamAnalyzer(),
+        preferences: UserDefaults = .standard
+    ) {
         self.analyzer = analyzer
+        self.preferences = preferences
         notificationService = .shared
         model = OpenAIExamAnalyzer.defaultModel
+        analysisProfile = AnalysisProfile(
+            rawValue: preferences.string(forKey: Self.profilePreferenceKey) ?? ""
+        ) ?? .general
         refreshKeyStatus()
     }
 
@@ -145,11 +158,14 @@ final class ExamAnalysisController: ObservableObject {
         do { key = try loadAPIKey() }
         catch { phase = .failed(error.localizedDescription); return }
         let selectedModel = model
+        let selectedProfile = analysisProfile
         cloudRoute = .connecting
         analysisTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await analyzer.analyze(jpeg: jpeg, apiKey: key, model: selectedModel)
+                let result = try await analyzer.analyze(
+                    jpeg: jpeg, apiKey: key, model: selectedModel, profile: selectedProfile
+                )
                 guard !Task.isCancelled else { return }
                 cloudRoute = .cellularVerified
                 phase = .succeeded(result)
@@ -186,6 +202,7 @@ final class ExamAnalysisController: ObservableObject {
 
         let sessionID = UUID()
         continuousSessionID = sessionID
+        continuousAnalysisProfile = analysisProfile
         continuousState = .requestingNotificationPermission
         resetCycleDisplay()
         lastContinuousMessage = "Waiting for iOS notification permission."
@@ -210,6 +227,7 @@ final class ExamAnalysisController: ObservableObject {
 
     func stopContinuous(message: String = "Analysis stopped.") {
         continuousSessionID = nil
+        continuousAnalysisProfile = nil
         monitorTask?.cancel()
         uploadTask?.cancel()
         monitorTask = nil
@@ -321,7 +339,10 @@ final class ExamAnalysisController: ObservableObject {
             hasUploadFinished = false
             uploadOutcome = nil
             cloudRoute = .connecting
-            let result = try await analyzer.analyze(jpegs: images, apiKey: key, model: model)
+            let selectedProfile = continuousAnalysisProfile ?? analysisProfile
+            let result = try await analyzer.analyze(
+                jpegs: images, apiKey: key, model: model, profile: selectedProfile
+            )
             guard isCurrentSession(sessionID), !Task.isCancelled else { return }
             continuousRequestInFlight = false
             hasUploadFinished = true

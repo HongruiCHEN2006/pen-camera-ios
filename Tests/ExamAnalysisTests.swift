@@ -8,7 +8,7 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(NetworkRoutePolicy.cloudCellularParameters().requiredInterfaceType, .cellular)
     }
 
-    func testBatchRequestUsesLunaLowReasoningAndHighDetailForEachImage() throws {
+    func testBatchRequestUsesSolMediumReasoningAndHighDetailForEachImage() throws {
         let images = [Data([0xFF, 0xD8, 1, 0xFF, 0xD9]), Data([0xFF, 0xD8, 2, 0xFF, 0xD9])]
         let request = try OpenAIExamAnalyzer.makeRequest(
             jpegs: images, apiKey: "sk-test-only", model: OpenAIExamAnalyzer.defaultModel
@@ -18,10 +18,14 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-test-only")
         let body = try XCTUnwrap(request.httpBody)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(object["model"] as? String, "gpt-5.6-luna")
+        XCTAssertEqual(object["model"] as? String, "gpt-6.1-sol")
         XCTAssertEqual(object["store"] as? Bool, false)
         let reasoning = try XCTUnwrap(object["reasoning"] as? [String: Any])
-        XCTAssertEqual(reasoning["effort"] as? String, "low")
+        XCTAssertEqual(reasoning["effort"] as? String, "medium")
+        let instructions = try XCTUnwrap(object["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("selected_options"))
+        XCTAssertTrue(instructions.contains("not restricted to A-E"))
+
         let input = try XCTUnwrap(object["input"] as? [[String: Any]])
         let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
         let suppliedImages = content.filter { $0["type"] as? String == "input_image" }
@@ -33,6 +37,7 @@ final class ExamAnalysisTests: XCTestCase {
                 "data:image/jpeg;base64,\(images[index].base64EncodedString())"
             )
         }
+
         let text = try XCTUnwrap(object["text"] as? [String: Any])
         let format = try XCTUnwrap(text["format"] as? [String: Any])
         XCTAssertEqual(format["strict"] as? Bool, true)
@@ -41,73 +46,82 @@ final class ExamAnalysisTests: XCTestCase {
         let questions = try XCTUnwrap(properties["questions"] as? [String: Any])
         let items = try XCTUnwrap(questions["items"] as? [String: Any])
         XCTAssertEqual(items["required"] as? [String], [
-            "question_number", "opening", "question_type", "correct_answer", "choice_previews", "certainty"
+            "question_number", "opening", "question_type", "correct_answer",
+            "selected_options", "choice_previews", "certainty"
         ])
-        let prompt = try XCTUnwrap(content.first?["text"] as? String)
-        XCTAssertTrue(prompt.contains("first TWO words"))
-        XCTAssertTrue(prompt.contains("COMPLETE printed text"))
-        XCTAssertTrue(prompt.contains("all best-supported A-E letters"))
-        XCTAssertTrue(prompt.contains("FULL canonical answer"))
-        XCTAssertTrue(prompt.contains("Do not inspect, extract, compare, or grade"))
-        XCTAssertTrue(prompt.contains("meaningful best-effort answer"))
-        XCTAssertTrue(prompt.contains("visible fragments do not form a coherent question"))
     }
 
-    func testParsesConfirmedQuestionsAndRemovesDuplicatesWithinBatch() throws {
-        let text = #"{"questions":[{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"AC","choice_previews":[{"letter":"A","opening":"cell membrane"},{"letter":"C","opening":"nuclear envelope"}],"certainty":"certain"},{"question_number":"x","opening":"求图中阴影面积","question_type":"other","correct_answer":"24 平方厘米","choice_previews":[],"certainty":"certain"},{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"AC","choice_previews":[{"letter":"A","opening":"cell membrane"},{"letter":"C","opening":"nuclear envelope"}],"certainty":"certain"}]}"#
+    func testCS0447RequestUsesDedicated32BitMIPSInstructionsWithoutRetrieval() throws {
+        let request = try OpenAIExamAnalyzer.makeRequest(
+            jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+            apiKey: "sk-test-only",
+            model: OpenAIExamAnalyzer.defaultModel,
+            profile: .cs0447
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let instructions = try XCTUnwrap(object["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("CS 0447"))
+        XCTAssertTrue(instructions.contains("assume 32-bit MIPS"))
+        XCTAssertTrue(instructions.contains("word is 32 bits"))
+        XCTAssertTrue(instructions.contains("does not establish endianness"))
+        XCTAssertTrue(instructions.contains("Do not use web search, file search, retrieval"))
+        XCTAssertTrue(instructions.contains("Never claim code was executed or simulator-verified"))
+    }
+
+    func testParsesMultipleLetterChoicesAndRemovesDuplicatesWithinBatch() throws {
+        let text = #"{"questions":[{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"","selected_options":["A","G"],"choice_previews":[{"label":"A","opening":"cell membrane"},{"label":"G","opening":"nuclear envelope"}],"certainty":"certain"},{"question_number":"x","opening":"求图中阴影面积","question_type":"other","correct_answer":"24 平方厘米","selected_options":[],"choice_previews":[],"certainty":"certain"},{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"","selected_options":["A","G"],"choice_previews":[{"label":"A","opening":"cell membrane"},{"label":"G","opening":"nuclear envelope"}],"certainty":"certain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(result.questions.count, 2)
-        XCTAssertEqual(result.questions[0].questionNumber, "2")
-        XCTAssertEqual(result.questions[0].displayAnswer, "AC（A. cell membrane；C. nuclear envelope）")
-        XCTAssertEqual(result.questions[1].questionNumber, "x")
-        XCTAssertEqual(result.questions[1].opening, "求图中阴影面积")
+        XCTAssertEqual(result.questions[0].displayAnswer, "A, G（A. cell membrane；G. nuclear envelope）")
         XCTAssertEqual(result.questions[1].displayAnswer, "24 平方厘米")
     }
 
-    func testRejectsMissingAnswer() throws {
-        let text = #"{"questions":[{"question_number":"6","opening":"Solve this equation","question_type":"other","correct_answer":"","choice_previews":[],"certainty":"certain"}]}"#
-        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
-            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
-        }
-    }
-
-    func testRejectsChoiceWithoutEveryCorrectOptionPreview() throws {
-        let text = #"{"questions":[{"question_number":"6","opening":"Choose the correct","question_type":"multiple_choice","correct_answer":"AC","choice_previews":[{"letter":"A","opening":"first choice"}],"certainty":"certain"}]}"#
-        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
-            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
-        }
-    }
-
-    func testAcceptsOneWordChoice() throws {
-        let text = #"{"questions":[{"question_number":"4","opening":"Which animal flies","question_type":"single_choice","correct_answer":"A","choice_previews":[{"letter":"A","opening":"Bird"}],"certainty":"certain"}]}"#
+    func testNumericOptionLabelsRemainUnambiguous() throws {
+        let text = #"{"questions":[{"question_number":"7","opening":"Select all valid loads","question_type":"multiple_choice","correct_answer":"","selected_options":["1","3","10"],"choice_previews":[{"label":"1","opening":"Load signed"},{"label":"3","opening":"Load unsigned"},{"label":"10","opening":"Store word"}],"certainty":"certain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
-        XCTAssertEqual(result.questions.first?.displayAnswer, "A. Bird")
-    }
-
-    func testSingleChoiceKeepsCompleteOptionText() throws {
-        let text = #"{"questions":[{"question_number":"5","opening":"Choose the organelle","question_type":"single_choice","correct_answer":"B","choice_previews":[{"letter":"B","opening":"The mitochondrion produces usable cellular energy"}],"certainty":"certain"}]}"#
-        let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
+        XCTAssertEqual(result.questions.first?.selectedOptions, ["1", "3", "10"])
         XCTAssertEqual(
             result.questions.first?.displayAnswer,
-            "B. The mitochondrion produces usable cellular energy"
+            "1, 3, 10（1. Load signed；3. Load unsigned；10. Store word）"
         )
     }
 
-    func testRejectsSingleChoiceWithMoreThanOneLetter() throws {
-        let text = #"{"questions":[{"question_number":"5","opening":"Choose one","question_type":"single_choice","correct_answer":"AB","choice_previews":[{"letter":"A","opening":"First full option"},{"letter":"B","opening":"Second full option"}],"certainty":"certain"}]}"#
+    func testAcceptsMultiCharacterSingleChoiceIdentifier() throws {
+        let text = #"{"questions":[{"question_number":"4","opening":"Choose one","question_type":"single_choice","correct_answer":"","selected_options":["AA"],"choice_previews":[{"label":"AA","opening":"Full option text"}],"certainty":"certain"}]}"#
+        let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
+        XCTAssertEqual(result.questions.first?.displayAnswer, "AA. Full option text")
+    }
+
+    func testRejectsMissingNonChoiceAnswer() throws {
+        let text = #"{"questions":[{"question_number":"6","opening":"Solve this equation","question_type":"other","correct_answer":"","selected_options":[],"choice_previews":[],"certainty":"certain"}]}"#
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
+            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
+        }
+    }
+
+    func testRejectsChoiceWithoutEveryCertainOptionPreview() throws {
+        let text = #"{"questions":[{"question_number":"6","opening":"Choose the correct","question_type":"multiple_choice","correct_answer":"","selected_options":["A","C"],"choice_previews":[{"label":"A","opening":"first choice"}],"certainty":"certain"}]}"#
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
+            XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
+        }
+    }
+
+    func testRejectsSingleChoiceWithTwoSelectedIdentifiers() throws {
+        let text = #"{"questions":[{"question_number":"5","opening":"Choose one","question_type":"single_choice","correct_answer":"","selected_options":["1","2"],"choice_previews":[{"label":"1","opening":"First full option"},{"label":"2","opening":"Second full option"}],"certainty":"certain"}]}"#
         XCTAssertThrowsError(try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)) {
             XCTAssertEqual($0 as? OpenAIExamError, .malformedStructuredOutput)
         }
     }
 
     func testKeepsCompleteFillInAnswer() throws {
-        let text = #"{"questions":[{"question_number":"1","opening":"100 + 100","question_type":"other","correct_answer":"200 kilograms total","choice_previews":[],"certainty":"certain"}]}"#
+        let text = #"{"questions":[{"question_number":"1","opening":"100 + 100","question_type":"other","correct_answer":"200 kilograms total","selected_options":[],"choice_previews":[],"certainty":"certain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(result.questions.first?.displayAnswer, "200 kilograms total")
     }
 
     func testUncertainQuestionReturnsBestEffortNotificationText() throws {
-        let text = #"{"questions":[{"question_number":"8","opening":"Estimate the area","question_type":"other","correct_answer":"approximately 24 cm²","choice_previews":[],"certainty":"uncertain"}]}"#
+        let text = #"{"questions":[{"question_number":"8","opening":"Estimate the area","question_type":"other","correct_answer":"approximately 24 cm²","selected_options":[],"choice_previews":[],"certainty":"uncertain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(
             result.questions.first?.displayAnswer,
@@ -115,10 +129,10 @@ final class ExamAnalysisTests: XCTestCase {
         )
     }
 
-    func testUncertainChoiceMayOmitUnreadableOptionPreview() throws {
-        let text = #"{"questions":[{"question_number":"9","opening":"Choose the likely","question_type":"single_choice","correct_answer":"C","choice_previews":[],"certainty":"uncertain"}]}"#
+    func testUncertainNumericChoiceMayOmitUnreadableOptionPreview() throws {
+        let text = #"{"questions":[{"question_number":"9","opening":"Choose the likely","question_type":"single_choice","correct_answer":"","selected_options":["10"],"choice_previews":[],"certainty":"uncertain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
-        XCTAssertEqual(result.questions.first?.displayAnswer, "无法确定。基于现有材料：C")
+        XCTAssertEqual(result.questions.first?.displayAnswer, "无法确定。基于现有材料：10")
     }
 
     func testEmptyConfirmedListIsValid() throws {
@@ -131,7 +145,7 @@ final class ExamAnalysisTests: XCTestCase {
     func testCellularRequestUsesHTTP11() throws {
         let request = try OpenAIExamAnalyzer.makeRequest(
             jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
-            apiKey: "sk-test-only", model: "gpt-5.6-luna"
+            apiKey: "sk-test-only", model: "gpt-6.1-sol"
         )
         let prepared = try CellularHTTPSClient.prepare(request)
         let text = try XCTUnwrap(String(data: prepared.bytes, encoding: .utf8))
@@ -144,7 +158,7 @@ final class ExamAnalysisTests: XCTestCase {
     func testRejectsAPIKeyHeaderInjection() {
         XCTAssertThrowsError(try OpenAIExamAnalyzer.makeRequest(
             jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
-            apiKey: "sk-test\r\nInjected: true", model: "gpt-5.6-luna"
+            apiKey: "sk-test\r\nInjected: true", model: "gpt-6.1-sol"
         )) {
             XCTAssertEqual($0 as? OpenAIExamError, .invalidAPIKey)
         }
