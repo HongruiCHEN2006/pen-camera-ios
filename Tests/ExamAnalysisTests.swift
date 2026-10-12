@@ -125,14 +125,14 @@ final class ExamAnalysisTests: XCTestCase {
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(
             result.questions.first?.displayAnswer,
-            "无法确定。基于现有材料：approximately 24 cm²"
+            "不。approximately 24 cm²"
         )
     }
 
     func testUncertainNumericChoiceMayOmitUnreadableOptionPreview() throws {
         let text = #"{"questions":[{"question_number":"9","opening":"Choose the likely","question_type":"single_choice","correct_answer":"","selected_options":["10"],"choice_previews":[],"certainty":"uncertain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
-        XCTAssertEqual(result.questions.first?.displayAnswer, "无法确定。基于现有材料：10")
+        XCTAssertEqual(result.questions.first?.displayAnswer, "不。10")
     }
 
     func testEmptyConfirmedListIsValid() throws {

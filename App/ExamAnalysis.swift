@@ -27,7 +27,7 @@ struct ExamQuestionResult: Codable, Equatable, Identifiable, Sendable {
         case "multiple_choice": answer = options.isEmpty ? labels : "\(labels)（\(options)）"
         default: answer = correctAnswer
         }
-        return certainty == "uncertain" ? "无法确定。基于现有材料：\(answer)" : answer
+        return certainty == "uncertain" ? "不。\(answer)" : answer
     }
 
     var id: String { questionNumber + "-" + opening + "-" + selectedOptions.joined(separator: "|") + correctAnswer }
