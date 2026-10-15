@@ -69,6 +69,39 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertTrue(instructions.contains("Never claim code was executed or simulator-verified"))
     }
 
+    func testIntroPsychologyRequestUsesDedicatedCourseInstructionsAndSharedSchemaRules() throws {
+        let request = try OpenAIExamAnalyzer.makeRequest(
+            jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+            apiKey: "sk-test-only",
+            model: OpenAIExamAnalyzer.defaultModel,
+            profile: .introPsychology
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let instructions = try XCTUnwrap(object["instructions"] as? String)
+
+        XCTAssertTrue(instructions.contains("introductory psychology course"))
+        XCTAssertTrue(instructions.contains("Course-specific emphasis: Learning Principles"))
+        XCTAssertTrue(instructions.contains("Course-specific emphasis: Memory"))
+        XCTAssertTrue(instructions.contains("Course-specific emphasis: Thinking and Cognition"))
+        XCTAssertTrue(instructions.contains("fixed-ratio, variable-ratio"))
+        XCTAssertTrue(instructions.contains("prototype theory from exemplar theory"))
+        XCTAssertTrue(instructions.contains("minor visual imperfections"))
+        XCTAssertTrue(instructions.contains("Treat a matching question as question_type=\"other\""))
+        XCTAssertTrue(instructions.contains("not restricted to A-E"))
+        XCTAssertTrue(instructions.contains("Return only JSON matching the supplied schema"))
+        XCTAssertTrue(instructions.contains("Do not use web search, file search, retrieval"))
+        XCTAssertFalse(instructions.contains("CS 0447"))
+    }
+
+    func testAllAnalysisProfilesAppearInCategoryPickerOrder() {
+        XCTAssertEqual(
+            AnalysisProfile.allCases,
+            [.general, .cs0447, .introPsychology]
+        )
+        XCTAssertEqual(AnalysisProfile.introPsychology.displayName, "Intro to Psychology")
+    }
+
     func testParsesMultipleLetterChoicesAndRemovesDuplicatesWithinBatch() throws {
         let text = #"{"questions":[{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"","selected_options":["A","G"],"choice_previews":[{"label":"A","opening":"cell membrane"},{"label":"G","opening":"nuclear envelope"}],"certainty":"certain"},{"question_number":"x","opening":"求图中阴影面积","question_type":"other","correct_answer":"24 平方厘米","selected_options":[],"choice_previews":[],"certainty":"certain"},{"question_number":"2","opening":"Find the value","question_type":"multiple_choice","correct_answer":"","selected_options":["A","G"],"choice_previews":[{"label":"A","opening":"cell membrane"},{"label":"G","opening":"nuclear envelope"}],"certainty":"certain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
