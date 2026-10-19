@@ -156,7 +156,7 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Label("Start Batch Capture", systemImage: "bell.badge.fill")
+                    Label("Start G2 Analysis", systemImage: "eyeglasses")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -221,7 +221,8 @@ struct ContentView: View {
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
                 valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
                 valueRow("Current images", "\(analysis.preparedImageCount)")
-                valueRow("iOS notifications", "\(analysis.notificationCount)")
+                valueRow("G2 questions pushed", "\(analysis.glassesPushCount)")
+                valueRow("G2 relay", GlassesRelayServer.endpointDescription)
                 if let detail = analysis.cloudRoute.detail {
                     Text(detail)
                         .font(.caption)
@@ -243,7 +244,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each confirmed question creates a separate iOS notification. The current batch may continue in the background if iOS accepts the task; iOS can end it at any time.")
+                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each complete question and answer is pushed to the Pen Camera plugin on Even G2. Keep this app in the foreground while capturing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

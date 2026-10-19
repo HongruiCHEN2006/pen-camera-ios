@@ -25,6 +25,8 @@ final class ExamAnalysisTests: XCTestCase {
         let instructions = try XCTUnwrap(object["instructions"] as? String)
         XCTAssertTrue(instructions.contains("selected_options"))
         XCTAssertTrue(instructions.contains("not restricted to A-E"))
+        XCTAssertTrue(instructions.contains("COMPLETE printed question text"))
+        XCTAssertTrue(instructions.contains("Never abbreviate, summarize, paraphrase"))
 
         let input = try XCTUnwrap(object["input"] as? [[String: Any]])
         let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
@@ -151,6 +153,31 @@ final class ExamAnalysisTests: XCTestCase {
         let text = #"{"questions":[{"question_number":"1","opening":"100 + 100","question_type":"other","correct_answer":"200 kilograms total","selected_options":[],"choice_previews":[],"certainty":"certain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)
         XCTAssertEqual(result.questions.first?.displayAnswer, "200 kilograms total")
+    }
+
+    func testGlassesRelayPreservesFullQuestionAndAnswer() {
+        let relay = GlassesRelayServer()
+        let question = ExamQuestionResult(
+            questionNumber: "12",
+            opening: "A cart starts from rest and accelerates at 2 m/s² for 5 seconds. What is its final velocity?",
+            questionType: "other",
+            correctAnswer: "10 m/s",
+            selectedOptions: [],
+            choicePreviews: [],
+            certainty: "certain"
+        )
+
+        let published = relay.publish(
+            question: question,
+            receivedAt: Date(timeIntervalSince1970: 0)
+        )
+        let snapshot = relay.snapshot(after: 0)
+
+        XCTAssertEqual(published.sequence, 1)
+        XCTAssertEqual(snapshot.latestSequence, 1)
+        XCTAssertEqual(snapshot.questions.first?.question, question.opening)
+        XCTAssertEqual(snapshot.questions.first?.answer, "10 m/s")
+        XCTAssertFalse(snapshot.sessionID.isEmpty)
     }
 
     func testUncertainQuestionReturnsBestEffortNotificationText() throws {

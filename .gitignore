@@ -6,3 +6,6 @@ DerivedData/
 xcuserdata/
 PenCamera.xcodeproj/
 Resources/Info.plist
+EvenG2/node_modules/
+EvenG2/dist/
+EvenG2/*.ehpk

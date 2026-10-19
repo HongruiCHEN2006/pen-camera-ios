@@ -34,7 +34,7 @@ final class ExamAnalysisController: ObservableObject {
 
     enum ContinuousState: Equatable {
         case stopped
-        case requestingNotificationPermission
+        case startingGlassesRelay
         case waitingForImage
         case recording
         case uploading
@@ -43,7 +43,7 @@ final class ExamAnalysisController: ObservableObject {
         var title: String {
             switch self {
             case .stopped: "Stopped"
-            case .requestingNotificationPermission: "Requesting notification permission"
+            case .startingGlassesRelay: "Starting Even G2 relay"
             case .waitingForImage: "Waiting for image (3s checks)"
             case .recording: "Recording (1s samples)"
             case .uploading: "Uploading one batch"
@@ -53,7 +53,7 @@ final class ExamAnalysisController: ObservableObject {
 
         var isActive: Bool {
             switch self {
-            case .requestingNotificationPermission, .waitingForImage, .recording, .uploading: true
+            case .startingGlassesRelay, .waitingForImage, .recording, .uploading: true
             case .stopped, .failed: false
             }
         }
@@ -70,7 +70,7 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var cloudRoute: CloudRoute = .cellularRequired
     @Published private(set) var continuousState: ContinuousState = .stopped
     @Published private(set) var continuousRequestCount = 0
-    @Published private(set) var notificationCount = 0
+    @Published private(set) var glassesPushCount = 0
     @Published private(set) var continuousRequestInFlight = false
     @Published private(set) var isCurrentFrameBlack: Bool?
     @Published private(set) var hasUploadStarted = false
@@ -89,7 +89,7 @@ final class ExamAnalysisController: ObservableObject {
     private static let profilePreferenceKey = "analysis-profile"
     private let keychain = KeychainStore(service: "com.hongrui.pencamera.openai", account: "api-key")
     private let analyzer: OpenAIExamAnalyzer
-    private let notificationService: QuestionNotificationService
+    private let glassesRelay: GlassesRelayServer
     private let preferences: UserDefaults
     private var capturedJPEG: Data?
     private var analysisTask: Task<Void, Never>?
@@ -106,7 +106,7 @@ final class ExamAnalysisController: ObservableObject {
     ) {
         self.analyzer = analyzer
         self.preferences = preferences
-        notificationService = .shared
+        glassesRelay = .shared
         model = OpenAIExamAnalyzer.defaultModel
         analysisProfile = AnalysisProfile(
             rawValue: preferences.string(forKey: Self.profilePreferenceKey) ?? ""
@@ -203,25 +203,22 @@ final class ExamAnalysisController: ObservableObject {
         let sessionID = UUID()
         continuousSessionID = sessionID
         continuousAnalysisProfile = analysisProfile
-        continuousState = .requestingNotificationPermission
+        continuousState = .startingGlassesRelay
         resetCycleDisplay()
-        lastContinuousMessage = "Waiting for iOS notification permission."
+        lastContinuousMessage = "Starting the local Even G2 question relay."
+        do {
+            try glassesRelay.start()
+        } catch {
+            continuousState = .failed(error.localizedDescription)
+            lastContinuousMessage = error.localizedDescription
+            return
+        }
+        UIApplication.shared.isIdleTimerDisabled = true
+        continuousState = .waitingForImage
+        lastContinuousMessage = "Even G2 relay ready at \(GlassesRelayServer.endpointDescription)."
         monitorTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            do {
-                let granted = try await notificationService.requestAuthorization()
-                guard isCurrentSession(sessionID) else { return }
-                guard granted else {
-                    failContinuous("Enable Pen Camera notifications in iOS Settings.", sessionID: sessionID)
-                    return
-                }
-                UIApplication.shared.isIdleTimerDisabled = true
-                continuousState = .waitingForImage
-                await monitor(sessionID: sessionID, frameProvider: frameProvider)
-            } catch {
-                guard isCurrentSession(sessionID) else { return }
-                failContinuous(error.localizedDescription, sessionID: sessionID)
-            }
+            await monitor(sessionID: sessionID, frameProvider: frameProvider)
         }
     }
 
@@ -349,16 +346,12 @@ final class ExamAnalysisController: ObservableObject {
             cloudRoute = .cellularVerified
             uploadOutcome = "成功"
             lastContinuousResult = result
-            for (index, question) in result.questions.enumerated() {
+            for question in result.questions {
                 guard isCurrentSession(sessionID), !Task.isCancelled else { return }
-                do {
-                    try await notificationService.notify(question: question, sequence: index + 1)
-                    notificationCount += 1
-                } catch {
-                    lastContinuousMessage = "Notification failed: \(error.localizedDescription)"
-                }
+                glassesRelay.publish(question: question)
+                glassesPushCount += 1
             }
-            lastContinuousMessage = "Upload finished: \(result.questions.count) confirmed question(s)."
+            lastContinuousMessage = "Upload finished: pushed \(result.questions.count) question(s) to Even G2."
             onBatchCompleted?(true)
         } catch is CancellationError {
             return
