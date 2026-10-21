@@ -23,6 +23,7 @@ const BODY_PADDING = 4
 const POLL_INTERVAL_MS = 750
 const MAX_LOCAL_QUESTIONS = 100
 const ARM_WINDOW_MS = 2_500
+const APP_VERSION = '0.2.2'
 
 type CaptureMode = 'manual_capture' | 'black_screen_detection'
 type ViewKind = 'answers' | 'mode_picker' | 'preview'
@@ -126,7 +127,7 @@ function batchGroups(): RelayQuestion[][] {
 
 function answerDocument(): string {
   if (questions.length === 0) {
-    return '等待答案\n\n左镜腿：单击后长按进入模式选择\n右镜腿：双击退出'
+    return `Pen Camera G2 v${APP_VERSION}\n\n等待答案\n\n左镜腿：单击后长按进入模式选择\n右镜腿：双击退出`
   }
   return batchGroups().map((batch, batchIndex) => {
     const summary = batch.map((question) =>
@@ -302,7 +303,10 @@ async function clearAnswers(): Promise<void> {
 }
 
 function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
-  return envelope?.eventType ?? null
+  if (!envelope) return null
+  // The G2 host may omit eventType for an ordinary click. This is the
+  // compatibility behavior used by the original working reader.
+  return envelope.eventType ?? OsEventTypeList.CLICK_EVENT
 }
 
 function eventSourceOf(envelope?: Sys_ItemEvent): EventSourceType | null {
