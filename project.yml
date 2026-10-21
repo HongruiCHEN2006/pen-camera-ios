@@ -38,8 +38,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hongrui.pencamera
         PRODUCT_NAME: PenCamera
-        MARKETING_VERSION: 0.17.0
-        CURRENT_PROJECT_VERSION: 21
+        MARKETING_VERSION: 0.18.0
+        CURRENT_PROJECT_VERSION: 22
   PenCameraTests:
     type: bundle.unit-test
     platform: iOS

@@ -221,7 +221,12 @@ struct ContentView: View {
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
                 valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
                 valueRow("Current images", "\(analysis.preparedImageCount)")
+                valueRow(
+                    "G2 capture mode",
+                    analysis.captureMode == .manualCapture ? "Manual 3-photo bursts" : "Black-screen detection"
+                )
                 valueRow("G2 questions pushed", "\(analysis.glassesPushCount)")
+                valueRow("Notification pop-ups", "\(analysis.notificationCount)")
                 valueRow("G2 relay", GlassesRelayServer.endpointDescription)
                 if let detail = analysis.cloudRoute.detail {
                     Text(detail)
@@ -244,7 +249,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("Check for an image every 3 seconds. While visible, save a frame every second. Two black checks end the batch; all saved images go in one cellular API request. Each complete question and answer is pushed to the Pen Camera plugin on Even G2. Keep this app in the foreground while capturing.")
+                Text("The G2 can select one capture mode: manual preview with 3-photo bursts, or the original black-screen detection flow. Every batch is uploaded in one cellular API request. Results go to both the G2 and the original iOS notification pop-ups. Keep this app in the foreground while capturing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -1,8 +1,23 @@
 import Foundation
 @preconcurrency import Network
 
+enum GlassesCaptureMode: String, Codable, Equatable, Sendable {
+    case manualCapture = "manual_capture"
+    case blackScreenDetection = "black_screen_detection"
+}
+
+enum GlassesControlAction: Equatable, Sendable {
+    case setMode(GlassesCaptureMode)
+    case captureBurst
+    case finishManualCapture
+    case clearAnswers
+}
+
 struct GlassesQuestionPayload: Codable, Equatable, Sendable {
     let sequence: Int
+    let batchID: String
+    let batchIndex: Int
+    let batchTotal: Int
     let questionNumber: String
     let question: String
     let answer: String
@@ -11,10 +26,11 @@ struct GlassesQuestionPayload: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case sequence
+        case batchID = "batch_id"
+        case batchIndex = "batch_index"
+        case batchTotal = "batch_total"
         case questionNumber = "question_number"
-        case question
-        case answer
-        case certainty
+        case question, answer, certainty
         case receivedAt = "received_at"
     }
 }
@@ -31,16 +47,24 @@ struct GlassesQuestionEnvelope: Codable, Equatable, Sendable {
     }
 }
 
+private struct GlassesStatusEnvelope: Codable {
+    let mode: GlassesCaptureMode
+    let previewSequence: Int
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case previewSequence = "preview_sequence"
+    }
+}
+
 enum GlassesRelayError: LocalizedError, Equatable {
     case invalidPort
     case listener(String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidPort:
-            "The Even G2 relay port is invalid."
-        case let .listener(message):
-            "The Even G2 relay could not start: \(message)"
+        case .invalidPort: "The Even G2 relay port is invalid."
+        case let .listener(message): "The Even G2 relay could not start: \(message)"
         }
     }
 }
@@ -53,9 +77,13 @@ final class GlassesRelayServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.hongrui.pencamera.even-g2-relay")
     private let lock = NSLock()
     private var listener: NWListener?
-    private let sessionID = UUID().uuidString
+    private var sessionID = UUID().uuidString
     private var questions: [GlassesQuestionPayload] = []
     private var nextSequence = 1
+    private var mode: GlassesCaptureMode = .blackScreenDetection
+    private var previewJPEG: Data?
+    private var previewSequence = 0
+    private var controlHandler: (@Sendable (GlassesControlAction) -> Void)?
     private let encoder: JSONEncoder
 
     init() {
@@ -70,17 +98,13 @@ final class GlassesRelayServer: @unchecked Sendable {
         guard let port = NWEndpoint.Port(rawValue: Self.portNumber) else {
             throw GlassesRelayError.invalidPort
         }
-
         do {
             let parameters = NWParameters.tcp
             parameters.requiredLocalEndpoint = .hostPort(
-                host: NWEndpoint.Host("127.0.0.1"),
-                port: port
+                host: NWEndpoint.Host("127.0.0.1"), port: port
             )
             let newListener = try NWListener(using: parameters)
-            newListener.newConnectionHandler = { [weak self] connection in
-                self?.accept(connection)
-            }
+            newListener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
             newListener.stateUpdateHandler = { state in
                 if case let .failed(error) = state {
                     NSLog("Even G2 relay failed: %@", error.localizedDescription)
@@ -94,35 +118,72 @@ final class GlassesRelayServer: @unchecked Sendable {
         }
     }
 
+    func setControlHandler(_ handler: @escaping @Sendable (GlassesControlAction) -> Void) {
+        lock.withLock { controlHandler = handler }
+    }
+
+    func setMode(_ newMode: GlassesCaptureMode) {
+        lock.withLock {
+            mode = newMode
+            if newMode != .manualCapture { previewJPEG = nil }
+        }
+    }
+
+    func publishPreview(_ jpeg: Data) {
+        lock.withLock {
+            previewJPEG = jpeg
+            previewSequence += 1
+        }
+    }
+
     @discardableResult
     func publish(question: ExamQuestionResult, receivedAt: Date = Date()) -> GlassesQuestionPayload {
+        publishBatch([question], receivedAt: receivedAt)[0]
+    }
+
+    @discardableResult
+    func publishBatch(
+        _ batch: [ExamQuestionResult], receivedAt: Date = Date()
+    ) -> [GlassesQuestionPayload] {
         lock.lock()
         defer { lock.unlock() }
-
-        let payload = GlassesQuestionPayload(
-            sequence: nextSequence,
-            questionNumber: question.questionNumber,
-            question: question.opening,
-            answer: question.displayAnswer,
-            certainty: question.certainty,
-            receivedAt: ISO8601DateFormatter().string(from: receivedAt)
-        )
-        nextSequence += 1
-        questions.append(payload)
-        if questions.count > 100 {
-            questions.removeFirst(questions.count - 100)
+        let batchID = UUID().uuidString
+        let timestamp = ISO8601DateFormatter().string(from: receivedAt)
+        let payloads = batch.enumerated().map { index, question in
+            GlassesQuestionPayload(
+                sequence: nextSequence + index,
+                batchID: batchID,
+                batchIndex: index + 1,
+                batchTotal: batch.count,
+                questionNumber: question.questionNumber,
+                question: question.opening,
+                answer: question.displayAnswer,
+                certainty: question.certainty,
+                receivedAt: timestamp
+            )
         }
-        return payload
+        nextSequence += payloads.count
+        questions.append(contentsOf: payloads)
+        if questions.count > 100 { questions.removeFirst(questions.count - 100) }
+        return payloads
+    }
+
+    func clearQuestions() {
+        lock.withLock {
+            questions.removeAll()
+            nextSequence = 1
+            sessionID = UUID().uuidString
+        }
     }
 
     func snapshot(after sequence: Int) -> GlassesQuestionEnvelope {
-        lock.lock()
-        defer { lock.unlock() }
-        return GlassesQuestionEnvelope(
-            sessionID: sessionID,
-            latestSequence: nextSequence - 1,
-            questions: questions.filter { $0.sequence > sequence }
-        )
+        lock.withLock {
+            GlassesQuestionEnvelope(
+                sessionID: sessionID,
+                latestSequence: nextSequence - 1,
+                questions: questions.filter { $0.sequence > sequence }
+            )
+        }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -147,7 +208,6 @@ final class GlassesRelayServer: @unchecked Sendable {
             send(status: "400 Bad Request", body: Data(), on: connection)
             return
         }
-
         let method = String(components[0])
         if method == "OPTIONS" {
             send(status: "204 No Content", body: Data(), on: connection)
@@ -159,40 +219,86 @@ final class GlassesRelayServer: @unchecked Sendable {
         }
 
         let target = String(components[1])
-        guard let url = URL(string: "http://localhost\(target)"),
-              url.path == "/api/questions" else {
-            send(status: "404 Not Found", body: Data(), on: connection)
+        guard let url = URL(string: "http://localhost\(target)") else {
+            send(status: "400 Bad Request", body: Data(), on: connection)
             return
         }
-        let after = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first(where: { $0.name == "after" })?.value
-            .flatMap(Int.init) ?? 0
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value: (String) -> String? = { name in query.first { $0.name == name }?.value }
 
-        do {
-            let body = try encoder.encode(snapshot(after: max(0, after)))
-            send(status: "200 OK", body: body, on: connection)
-        } catch {
-            send(status: "500 Internal Server Error", body: Data(), on: connection)
+        switch url.path {
+        case "/api/questions":
+            let after = value("after").flatMap(Int.init) ?? 0
+            sendJSON(snapshot(after: max(0, after)), on: connection)
+        case "/api/status":
+            let status = lock.withLock {
+                GlassesStatusEnvelope(mode: mode, previewSequence: previewSequence)
+            }
+            sendJSON(status, on: connection)
+        case "/api/preview":
+            let after = value("after").flatMap(Int.init) ?? 0
+            let preview = lock.withLock { (previewSequence, previewJPEG) }
+            guard preview.0 > after, let jpeg = preview.1 else {
+                send(status: "204 No Content", body: Data(), on: connection)
+                return
+            }
+            send(
+                status: "200 OK", body: jpeg, contentType: "image/jpeg",
+                extraHeaders: ["X-Preview-Sequence": String(preview.0)], on: connection
+            )
+        case "/api/control":
+            guard let action = controlAction(name: value("action"), mode: value("mode")) else {
+                send(status: "400 Bad Request", body: Data(), on: connection)
+                return
+            }
+            let handler = lock.withLock { controlHandler }
+            handler?(action)
+            send(status: "204 No Content", body: Data(), on: connection)
+        default:
+            send(status: "404 Not Found", body: Data(), on: connection)
         }
     }
 
-    private func send(status: String, body: Data, on connection: NWConnection) {
+    private func controlAction(name: String?, mode: String?) -> GlassesControlAction? {
+        switch name {
+        case "set_mode":
+            guard let mode, let captureMode = GlassesCaptureMode(rawValue: mode) else { return nil }
+            return .setMode(captureMode)
+        case "capture_burst": return .captureBurst
+        case "finish_capture": return .finishManualCapture
+        case "clear_answers": return .clearAnswers
+        default: return nil
+        }
+    }
+
+    private func sendJSON<T: Encodable>(_ value: T, on connection: NWConnection) {
+        do { send(status: "200 OK", body: try encoder.encode(value), on: connection) }
+        catch { send(status: "500 Internal Server Error", body: Data(), on: connection) }
+    }
+
+    private func send(
+        status: String,
+        body: Data,
+        contentType: String = "application/json; charset=utf-8",
+        extraHeaders: [String: String] = [:],
+        on connection: NWConnection
+    ) {
+        let additional = extraHeaders.map { "\($0.key): \($0.value)\r\n" }.joined()
         let header = """
         HTTP/1.1 \(status)\r
-        Content-Type: application/json; charset=utf-8\r
+        Content-Type: \(contentType)\r
         Content-Length: \(body.count)\r
         Cache-Control: no-store\r
         Access-Control-Allow-Origin: *\r
         Access-Control-Allow-Methods: GET, OPTIONS\r
         Access-Control-Allow-Headers: Content-Type\r
-        Connection: close\r
+        Access-Control-Expose-Headers: X-Preview-Sequence\r
+        \(additional)Connection: close\r
         \r
 
         """
         var response = Data(header.utf8)
         response.append(body)
-        connection.send(content: response, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
     }
 }

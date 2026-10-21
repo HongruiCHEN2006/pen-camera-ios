@@ -174,10 +174,50 @@ final class ExamAnalysisTests: XCTestCase {
         let snapshot = relay.snapshot(after: 0)
 
         XCTAssertEqual(published.sequence, 1)
+        XCTAssertEqual(published.batchIndex, 1)
+        XCTAssertEqual(published.batchTotal, 1)
+        XCTAssertFalse(published.batchID.isEmpty)
         XCTAssertEqual(snapshot.latestSequence, 1)
         XCTAssertEqual(snapshot.questions.first?.question, question.opening)
         XCTAssertEqual(snapshot.questions.first?.answer, "10 m/s")
         XCTAssertFalse(snapshot.sessionID.isEmpty)
+    }
+
+    func testGlassesRelayGroupsEveryQuestionFromOneUploadBatch() {
+        let relay = GlassesRelayServer()
+        let first = ExamQuestionResult(
+            questionNumber: "1", opening: "First complete question", questionType: "other",
+            correctAnswer: "First answer", selectedOptions: [], choicePreviews: [], certainty: "certain"
+        )
+        let second = ExamQuestionResult(
+            questionNumber: "2", opening: "Second complete question", questionType: "other",
+            correctAnswer: "Second answer", selectedOptions: [], choicePreviews: [], certainty: "certain"
+        )
+
+        let published = relay.publishBatch([first, second])
+
+        XCTAssertEqual(published.count, 2)
+        XCTAssertEqual(published[0].batchID, published[1].batchID)
+        XCTAssertEqual(published.map(\.batchIndex), [1, 2])
+        XCTAssertEqual(published.map(\.batchTotal), [2, 2])
+        XCTAssertEqual(relay.snapshot(after: 0).questions.count, 2)
+    }
+
+    func testClearingGlassesAnswersStartsFreshRelaySession() {
+        let relay = GlassesRelayServer()
+        let question = ExamQuestionResult(
+            questionNumber: "1", opening: "Question", questionType: "other",
+            correctAnswer: "Answer", selectedOptions: [], choicePreviews: [], certainty: "certain"
+        )
+        relay.publish(question: question)
+        let oldSession = relay.snapshot(after: 0).sessionID
+
+        relay.clearQuestions()
+        let cleared = relay.snapshot(after: 0)
+
+        XCTAssertNotEqual(cleared.sessionID, oldSession)
+        XCTAssertEqual(cleared.latestSequence, 0)
+        XCTAssertTrue(cleared.questions.isEmpty)
     }
 
     func testUncertainQuestionReturnsBestEffortNotificationText() throws {

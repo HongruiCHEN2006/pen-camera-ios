@@ -2,7 +2,7 @@
 
 Native iPhone companion app for the D7WN Wi-Fi camera pen.
 
-The repository now includes an Even G2 companion. While the native app remains in the foreground, it reads the D7WN stream over the camera's Wi-Fi, sends OpenAI traffic over cellular, and exposes completed questions to the Even plugin through a loopback-only HTTP relay. The plugin displays every full question and answer with pixel-accurate pagination and temple controls.
+The repository includes an Even G2 companion. While the native app remains in the foreground, it reads the D7WN stream over the camera's Wi-Fi, sends OpenAI traffic over cellular, and serves controls, low-frame-rate previews, and completed questions to the Even plugin through a loopback-only HTTP relay. Results appear as one continuous scroll document: every short answer in a batch comes first, followed by every complete question and answer. The original iOS notification pop-ups remain enabled.
 
 ## Verified hardware baseline
 
@@ -51,6 +51,8 @@ npm run pack
 ```
 
 Upload `EvenG2/Pen-Camera-G2.ehpk` as a private build. Open **Pen Camera** from the glasses menu once, then keep the native iPhone app in the foreground while capturing. The plugin keeps running in the Even App WebView on iOS and polls `127.0.0.1:8765`; it does not use the camera Wi-Fi for internet access.
+
+The left temple controls mutually exclusive capture modes. Click then long-press with no answers to open the selector. Manual mode shows a low-frame-rate preview; a left click captures three frames over one second and a left double-click uploads all queued frames together. Black-screen mode preserves the original automatic batch flow. With answers visible, click then long-press clears the answer document. Swipe to scroll, click to advance one screen, and double-click the right temple to exit.
 
 ## Status vocabulary
 
