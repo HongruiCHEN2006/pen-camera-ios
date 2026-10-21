@@ -284,11 +284,11 @@ async function sendControl(action: string, mode?: CaptureMode): Promise<void> {
 }
 
 async function chooseMode(mode: CaptureMode): Promise<void> {
-  await sendControl('set_mode', mode)
   captureMode = mode
   modeSelection = mode
   view = mode === 'manual_capture' ? 'preview' : 'answers'
   await render()
+  await sendControl('set_mode', mode)
 }
 
 async function clearAnswers(): Promise<void> {
@@ -319,10 +319,15 @@ function isRight(source: EventSourceType | null): boolean {
 
 async function handleGesture(type: OsEventTypeList, source: EventSourceType | null): Promise<void> {
   if (type === OsEventTypeList.CLICK_EVENT) {
+    // Some G2 firmware reports an ordinary click without a left/right source.
+    // On the mode picker, any single click is an unambiguous confirmation.
+    if (view === 'mode_picker') {
+      await chooseMode(modeSelection)
+      return
+    }
     if (isLeft(source)) {
       leftClickArmedUntil = Date.now() + ARM_WINDOW_MS
-      if (view === 'mode_picker') await chooseMode(modeSelection)
-      else if (view === 'preview') await sendControl('capture_burst')
+      if (view === 'preview') await sendControl('capture_burst')
       else scrollScreens(1)
     } else {
       scrollScreens(1)
