@@ -11,7 +11,7 @@ import {
 import { paginate } from './paginate'
 import './style.css'
 
-const APP_VERSION = '0.3.0'
+const APP_VERSION = '0.4.0'
 const RELAY_URL = 'http://127.0.0.1:8765/api/questions'
 const BODY_WIDTH = 576
 const BODY_HEIGHT = 240
@@ -34,7 +34,15 @@ interface RelayQuestion {
 interface RelayEnvelope {
   session_id: string
   latest_sequence: number
+  camera: CameraStatus
   questions: RelayQuestion[]
+}
+
+interface CameraStatus {
+  connected: boolean
+  state: string
+  battery_level?: number | null
+  updated_at: string
 }
 
 interface SavedState {
@@ -53,6 +61,12 @@ let bridge: EvenAppBridge
 let sessionID = ''
 let latestSequence = 0
 let questions: RelayQuestion[] = []
+let cameraStatus: CameraStatus = {
+  connected: false,
+  state: 'disconnected',
+  battery_level: null,
+  updated_at: '',
+}
 let scrollPosition = 0
 let viewports = ['等待答案']
 let pollTimer: number | undefined
@@ -104,11 +118,15 @@ function batchGroups(): RelayQuestion[][] {
 }
 
 function answerDocument(): string {
+  const cameraLine = cameraStatus.connected
+    ? `相机：已连接${typeof cameraStatus.battery_level === 'number' ? ` · 电量 ${cameraStatus.battery_level}%` : ''}`
+    : `相机：${cameraStatus.state === 'connecting' ? '连接中' : cameraStatus.state === 'reconnecting' ? '正在重连' : '未连接'}`
+
   if (questions.length === 0) {
-    return `Pen Camera G2 v${APP_VERSION}\n\n等待黑屏检测上传结果\n\n滑动滚动 · 单击下移 · 双击退出`
+    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n等待黑屏检测上传结果\n\n滑动滚动 · 单击下移 · 双击退出`
   }
 
-  return batchGroups().map((batch, batchIndex) => {
+  const answers = batchGroups().map((batch, batchIndex) => {
     const quickAnswers = batch.map((question) =>
       `${question.question_number}. ${brief(question.question)}\n大概答案：${question.answer}`,
     ).join('\n\n')
@@ -120,6 +138,7 @@ function answerDocument(): string {
 
     return `第 ${batchIndex + 1} 批 · 答案速览\n\n${quickAnswers}\n\n第 ${batchIndex + 1} 批 · 完整题目与具体答案\n\n${fullAnswers}`
   }).join('\n\n════════\n\n')
+  return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n${answers}`
 }
 
 function updateViewports(): void {
@@ -182,6 +201,8 @@ function isRelayEnvelope(value: unknown): value is RelayEnvelope {
   const candidate = value as Partial<RelayEnvelope>
   return typeof candidate.session_id === 'string'
     && typeof candidate.latest_sequence === 'number'
+    && !!candidate.camera
+    && typeof candidate.camera.connected === 'boolean'
     && Array.isArray(candidate.questions)
 }
 
@@ -196,6 +217,8 @@ async function poll(): Promise<void> {
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const payload: unknown = await response.json()
     if (!isRelayEnvelope(payload)) throw new Error('Invalid relay response')
+    const cameraChanged = JSON.stringify(cameraStatus) !== JSON.stringify(payload.camera)
+    cameraStatus = payload.camera
 
     if (sessionID && payload.session_id !== sessionID) {
       sessionID = payload.session_id
@@ -217,6 +240,8 @@ async function poll(): Promise<void> {
         questions = questions.slice(-MAX_LOCAL_QUESTIONS)
         updateViewports()
         scrollPosition = hadQuestions ? Math.min(previousViewportCount, viewports.length - 1) : 0
+        await render()
+      } else if (cameraChanged) {
         await render()
       }
       latestSequence = Math.max(latestSequence, payload.latest_sequence)

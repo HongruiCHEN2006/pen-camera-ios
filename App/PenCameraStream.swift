@@ -55,13 +55,16 @@ final class PenCameraStream: ObservableObject {
     static let cameraHost = "192.168.169.1"
     static let cameraPort: UInt16 = 6123
 
-    @Published private(set) var state: StreamState = .idle
+    @Published private(set) var state: StreamState = .idle {
+        didSet { publishCameraStatus() }
+    }
     @Published private(set) var latestImage: UIImage?
     @Published private(set) var latestJPEG: Data?
     @Published private(set) var frameCount = 0
     @Published private(set) var invalidJPEGCount = 0
     @Published private(set) var lastFrameAt: Date?
     @Published private(set) var firmware: String?
+    @Published private(set) var batteryLevel: Int?
     @Published private(set) var lastCaptureName: String?
     @Published private(set) var captureMessage: String?
     @Published private(set) var routeStatus = "Wi-Fi required"
@@ -246,7 +249,7 @@ final class PenCameraStream: ObservableObject {
                 return
             }
 
-            captureFirmwareIfPresent(in: packet.payload)
+            captureDeviceInfoIfPresent(in: packet.payload)
             switch step {
             case .liveMotion:
                 advance(
@@ -273,7 +276,7 @@ final class PenCameraStream: ObservableObject {
         case NaxCommand.jpeg:
             consumeJPEGPayload(packet.payload)
         case NaxCommand.json, NaxCommand.directMotion:
-            captureFirmwareIfPresent(in: packet.payload)
+            captureDeviceInfoIfPresent(in: packet.payload)
         default:
             break
         }
@@ -321,13 +324,16 @@ final class PenCameraStream: ObservableObject {
         }
     }
 
-    private func captureFirmwareIfPresent(in payload: Data) {
+    private func captureDeviceInfoIfPresent(in payload: Data) {
         guard
             !payload.isEmpty,
-            let object = try? JSONSerialization.jsonObject(with: payload),
-            let value = findFirmware(in: object)
+            let object = try? JSONSerialization.jsonObject(with: payload)
         else { return }
-        firmware = value
+        if let value = findFirmware(in: object) { firmware = value }
+        if let value = findBatteryLevel(in: object) {
+            batteryLevel = value
+            publishCameraStatus()
+        }
     }
 
     private func findFirmware(in object: Any) -> String? {
@@ -345,6 +351,51 @@ final class PenCameraStream: ObservableObject {
             }
         }
         return nil
+    }
+
+    private func findBatteryLevel(in object: Any) -> Int? {
+        if let dictionary = object as? [String: Any] {
+            let keys = [
+                "battery", "batteryLevel", "battery_level", "batteryPercent",
+                "battery_percent", "electricity", "electricQuantity"
+            ]
+            for key in keys {
+                guard let raw = dictionary[key] else { continue }
+                let level: Int?
+                if let number = raw as? NSNumber {
+                    level = number.intValue
+                } else if let text = raw as? String {
+                    level = Int(text.trimmingCharacters(in: CharacterSet(charactersIn: "% ")))
+                } else {
+                    level = nil
+                }
+                if let level, (0...100).contains(level) { return level }
+            }
+            for value in dictionary.values {
+                if let result = findBatteryLevel(in: value) { return result }
+            }
+        } else if let array = object as? [Any] {
+            for value in array {
+                if let result = findBatteryLevel(in: value) { return result }
+            }
+        }
+        return nil
+    }
+
+    private func publishCameraStatus() {
+        let status: String
+        switch state {
+        case .streaming: status = "connected"
+        case .connecting, .handshaking: status = "connecting"
+        case .reconnecting: status = "reconnecting"
+        case .failed: status = "failed"
+        case .idle, .stopped: status = "disconnected"
+        }
+        GlassesRelayServer.shared.updateCameraStatus(
+            connected: state.isLive,
+            state: status,
+            batteryLevel: batteryLevel
+        )
     }
 
     private func armHandshakeTimeout(for step: HandshakeStep, connection: NWConnection) {

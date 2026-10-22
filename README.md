@@ -15,6 +15,11 @@ The repository includes a deliberately simple Even G2 companion. While the nativ
 | Camera MAC | `5c:f0:97:da:73:67` |
 | Camera firmware | `202607151817` |
 
+The camera link is Wi-Fi/TCP rather than Bluetooth. The G2 home view shows the
+verified stream connection state. It also shows a battery percentage only when
+the camera's device-info response contains a recognized 0–100 battery field;
+otherwise the battery line is omitted.
+
 These values describe the verified AP-mode setup. Native iOS TCP access, protocol handshake, JPEG reconstruction, live video, local capture, and simultaneous Wi-Fi/cellular split routing are verified on the physical phone.
 
 ## Build locally on macOS

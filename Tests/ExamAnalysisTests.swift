@@ -181,6 +181,21 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(snapshot.questions.first?.question, question.opening)
         XCTAssertEqual(snapshot.questions.first?.answer, "10 m/s")
         XCTAssertFalse(snapshot.sessionID.isEmpty)
+        XCTAssertFalse(snapshot.camera.connected)
+        XCTAssertEqual(snapshot.camera.state, "disconnected")
+        XCTAssertNil(snapshot.camera.batteryLevel)
+    }
+
+    func testGlassesRelayPublishesCameraConnectionAndOptionalBattery() {
+        let relay = GlassesRelayServer()
+        relay.updateCameraStatus(connected: true, state: "connected", batteryLevel: 73)
+
+        let snapshot = relay.snapshot(after: 0)
+
+        XCTAssertTrue(snapshot.camera.connected)
+        XCTAssertEqual(snapshot.camera.state, "connected")
+        XCTAssertEqual(snapshot.camera.batteryLevel, 73)
+        XCTAssertFalse(snapshot.camera.updatedAt.isEmpty)
     }
 
     func testGlassesRelayGroupsEveryQuestionFromOneUploadBatch() {

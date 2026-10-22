@@ -26,12 +26,27 @@ struct GlassesQuestionPayload: Codable, Equatable, Sendable {
 struct GlassesQuestionEnvelope: Codable, Equatable, Sendable {
     let sessionID: String
     let latestSequence: Int
+    let camera: GlassesCameraStatusPayload
     let questions: [GlassesQuestionPayload]
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case latestSequence = "latest_sequence"
+        case camera
         case questions
+    }
+}
+
+struct GlassesCameraStatusPayload: Codable, Equatable, Sendable {
+    let connected: Bool
+    let state: String
+    let batteryLevel: Int?
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case connected, state
+        case batteryLevel = "battery_level"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -58,6 +73,12 @@ final class GlassesRelayServer: @unchecked Sendable {
     private let sessionID = UUID().uuidString
     private var questions: [GlassesQuestionPayload] = []
     private var nextSequence = 1
+    private var cameraStatus = GlassesCameraStatusPayload(
+        connected: false,
+        state: "disconnected",
+        batteryLevel: nil,
+        updatedAt: ISO8601DateFormatter().string(from: Date())
+    )
     private let encoder: JSONEncoder
 
     init() {
@@ -129,7 +150,19 @@ final class GlassesRelayServer: @unchecked Sendable {
             GlassesQuestionEnvelope(
                 sessionID: sessionID,
                 latestSequence: nextSequence - 1,
+                camera: cameraStatus,
                 questions: questions.filter { $0.sequence > sequence }
+            )
+        }
+    }
+
+    func updateCameraStatus(connected: Bool, state: String, batteryLevel: Int?) {
+        lock.withLock {
+            cameraStatus = GlassesCameraStatusPayload(
+                connected: connected,
+                state: state,
+                batteryLevel: batteryLevel,
+                updatedAt: ISO8601DateFormatter().string(from: Date())
             )
         }
     }

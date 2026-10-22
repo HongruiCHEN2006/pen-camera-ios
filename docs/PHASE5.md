@@ -28,6 +28,11 @@ The structured `opening` field now contains the complete reconstructed printed q
 
 The plugin uses `@evenrealities/pretext` to measure the G2 firmware's glyph widths and fixed line height. Internally it produces screen-sized viewports, but presents them as one continuous document without question/page navigation or page-number UI.
 
+The first viewport also reports the camera stream connection state. Battery is
+optional because the D7WN protocol has no verified battery command: the native
+app forwards a percentage only if a device-info JSON response exposes a known
+battery field with a value from 0 through 100.
+
 ## Controls
 
 - Swipe down/up: scroll the continuous answer document.
@@ -37,7 +42,7 @@ The plugin uses `@evenrealities/pretext` to measure the G2 firmware's glyph widt
 
 ## Physical test
 
-1. Install native build `0.19.0` and the private `Pen-Camera-G2.ehpk` build.
+1. Install native build `0.20.0` and the private `Pen-Camera-G2.ehpk` build.
 2. Open **Pen Camera** from the glasses menu. Leave it waiting for the phone relay.
 3. On iPhone, join `Nax_5cf097da7367`, keep cellular data enabled, and open the native Pen Camera app.
 4. Start the live stream, then tap **Start G2 Analysis**.
