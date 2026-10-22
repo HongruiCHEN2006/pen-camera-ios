@@ -72,7 +72,6 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var continuousRequestCount = 0
     @Published private(set) var glassesPushCount = 0
     @Published private(set) var notificationCount = 0
-    @Published private(set) var captureMode: GlassesCaptureMode = .blackScreenDetection
     @Published private(set) var continuousRequestInFlight = false
     @Published private(set) var isCurrentFrameBlack: Bool?
     @Published private(set) var hasUploadStarted = false
@@ -98,12 +97,9 @@ final class ExamAnalysisController: ObservableObject {
     private var analysisTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
-    private var manualBurstTask: Task<Void, Never>?
-    private var manualFinishRequested = false
     private var continuousSessionID: UUID?
     private var continuousAnalysisProfile: AnalysisProfile?
     private var currentBatch: CameraBatchCapture?
-    private var activeFrameProvider: (@MainActor @Sendable () -> CameraSample?)?
     var onBatchCompleted: ((Bool) -> Void)?
 
     init(
@@ -119,9 +115,6 @@ final class ExamAnalysisController: ObservableObject {
             rawValue: preferences.string(forKey: Self.profilePreferenceKey) ?? ""
         ) ?? .general
         refreshKeyStatus()
-        glassesRelay.setControlHandler { [weak self] action in
-            Task { @MainActor [weak self] in self?.handleGlassesControl(action) }
-        }
     }
 
     var isAnalyzing: Bool { phase == .analyzing }
@@ -213,7 +206,6 @@ final class ExamAnalysisController: ObservableObject {
         let sessionID = UUID()
         continuousSessionID = sessionID
         continuousAnalysisProfile = analysisProfile
-        activeFrameProvider = frameProvider
         continuousState = .startingGlassesRelay
         resetCycleDisplay()
         lastContinuousMessage = "Starting the local Even G2 question relay."
@@ -224,7 +216,6 @@ final class ExamAnalysisController: ObservableObject {
             lastContinuousMessage = error.localizedDescription
             return
         }
-        glassesRelay.setMode(captureMode)
         UIApplication.shared.isIdleTimerDisabled = true
         continuousState = .waitingForImage
         lastContinuousMessage = "Even G2 relay ready. Requesting notification permission."
@@ -248,12 +239,8 @@ final class ExamAnalysisController: ObservableObject {
         continuousAnalysisProfile = nil
         monitorTask?.cancel()
         uploadTask?.cancel()
-        manualBurstTask?.cancel()
         monitorTask = nil
         uploadTask = nil
-        manualBurstTask = nil
-        manualFinishRequested = false
-        activeFrameProvider = nil
         if let currentBatch { try? currentBatch.remove() }
         currentBatch = nil
         continuousRequestInFlight = false
@@ -278,16 +265,7 @@ final class ExamAnalysisController: ObservableObject {
                let black = CameraBlackFrameDetector.isBlack(sample.jpeg) {
                 lastFrameNumber = sample.frameNumber
                 isCurrentFrameBlack = black
-                if captureMode == .manualCapture {
-                    if let preview = makePreviewJPEG(sample.jpeg) {
-                        glassesRelay.publishPreview(preview)
-                    }
-                    if continuousState != .uploading && manualBurstTask == nil {
-                        continuousState = .waitingForImage
-                        lastContinuousMessage = "Manual capture: left click takes 3 photos; left double-click uploads."
-                    }
-                    blackStreak = 0
-                } else if continuousState == .uploading {
+                if continuousState == .uploading {
                     // Update the visible verdict without starting another batch.
                 } else if black {
                     if currentBatch != nil {
@@ -332,9 +310,7 @@ final class ExamAnalysisController: ObservableObject {
                 lastContinuousMessage = "Waiting for a fresh camera frame."
             }
 
-            let interval: TimeInterval = captureMode == .manualCapture
-                ? 1
-                : (currentBatch == nil && continuousState != .uploading ? 3 : 1)
+            let interval: TimeInterval = currentBatch == nil && continuousState != .uploading ? 3 : 1
             let remaining = max(0, interval - Date().timeIntervalSince(started))
             do { try await Task.sleep(for: .milliseconds(Int64(remaining * 1_000))) }
             catch { return }
@@ -423,113 +399,6 @@ final class ExamAnalysisController: ObservableObject {
         hasUploadFinished = false
         preparedImageCount = 0
         uploadOutcome = nil
-    }
-
-    private func handleGlassesControl(_ action: GlassesControlAction) {
-        guard let sessionID = continuousSessionID, isCurrentSession(sessionID) else { return }
-        switch action {
-        case let .setMode(mode):
-            guard continuousState != .uploading else {
-                lastContinuousMessage = "Wait for the current upload before switching modes."
-                return
-            }
-            manualBurstTask?.cancel()
-            manualBurstTask = nil
-            manualFinishRequested = false
-            if let currentBatch { try? currentBatch.remove() }
-            currentBatch = nil
-            captureMode = mode
-            glassesRelay.setMode(mode)
-            resetCycleDisplay()
-            lastContinuousMessage = mode == .manualCapture
-                ? "Manual capture mode selected."
-                : "Black-screen detection mode selected."
-        case .captureBurst:
-            guard captureMode == .manualCapture else { return }
-            captureManualBurst(sessionID: sessionID)
-        case .finishManualCapture:
-            guard captureMode == .manualCapture else { return }
-            if manualBurstTask != nil {
-                manualFinishRequested = true
-                lastContinuousMessage = "Finishing the 3-photo burst, then uploading all photos."
-            } else {
-                finishManualBatch(sessionID: sessionID)
-            }
-        case .clearAnswers:
-            glassesRelay.clearQuestions()
-            lastContinuousResult = nil
-            lastContinuousMessage = "Existing G2 answers cleared."
-        }
-    }
-
-    private func captureManualBurst(sessionID: UUID) {
-        guard manualBurstTask == nil, uploadTask == nil, let frameProvider = activeFrameProvider else {
-            lastContinuousMessage = "Capture or upload already in progress."
-            return
-        }
-        manualBurstTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            if currentBatch == nil { currentBatch = try? CameraBatchCapture() }
-            var lastFrame = -1
-            for index in 0..<3 {
-                guard isCurrentSession(sessionID), !Task.isCancelled else { return }
-                if index > 0 {
-                    do { try await Task.sleep(for: .milliseconds(500)) }
-                    catch { return }
-                }
-                guard let sample = frameProvider() else { continue }
-                if sample.frameNumber == lastFrame {
-                    do { try await Task.sleep(for: .milliseconds(120)) }
-                    catch { return }
-                }
-                guard let fresh = frameProvider() else { continue }
-                lastFrame = fresh.frameNumber
-                do {
-                    if try currentBatch?.append(fresh.jpeg) == true {
-                        preparedImageCount = currentBatch?.images.count ?? 0
-                    }
-                } catch {
-                    lastContinuousMessage = error.localizedDescription
-                    break
-                }
-            }
-            manualBurstTask = nil
-            lastContinuousMessage = "Captured 3 photos; \(preparedImageCount) queued in this batch."
-            if manualFinishRequested {
-                manualFinishRequested = false
-                finishManualBatch(sessionID: sessionID)
-            }
-        }
-    }
-
-    private func finishManualBatch(sessionID: UUID) {
-        guard let batch = currentBatch, !batch.images.isEmpty else {
-            lastContinuousMessage = "No manual photos to upload."
-            return
-        }
-        currentBatch = nil
-        continuousState = .uploading
-        lastContinuousMessage = "Uploading all \(batch.images.count) manually captured photos together."
-        beginUpload(batch, sessionID: sessionID)
-    }
-
-    private func makePreviewJPEG(_ source: Data) -> Data? {
-        guard let image = UIImage(data: source) else { return nil }
-        let size = CGSize(width: 288, height: 144)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let rendered = renderer.image { context in
-            UIColor.black.setFill()
-            context.cgContext.fill(CGRect(origin: .zero, size: size))
-            let scale = min(size.width / image.size.width, size.height / image.size.height)
-            let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-            image.draw(in: CGRect(
-                x: (size.width - drawSize.width) / 2,
-                y: (size.height - drawSize.height) / 2,
-                width: drawSize.width,
-                height: drawSize.height
-            ))
-        }
-        return rendered.jpegData(compressionQuality: 0.45)
     }
 
     private func failContinuous(_ message: String, sessionID: UUID) {

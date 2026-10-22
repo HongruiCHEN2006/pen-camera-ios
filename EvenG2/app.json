@@ -2,14 +2,14 @@
   "package_id": "com.hongrui.pencamera.g2",
   "edition": "202601",
   "name": "Pen Camera",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "min_app_version": "2.2.10",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
   "permissions": [
     {
       "name": "network",
-      "desc": "Receives camera previews and answers and sends capture controls to Pen Camera on this phone.",
+      "desc": "Receives completed question batches from Pen Camera on this phone.",
       "whitelist": ["http://127.0.0.1:8765"]
     }
   ],

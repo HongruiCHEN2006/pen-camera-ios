@@ -203,23 +203,6 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(relay.snapshot(after: 0).questions.count, 2)
     }
 
-    func testClearingGlassesAnswersStartsFreshRelaySession() {
-        let relay = GlassesRelayServer()
-        let question = ExamQuestionResult(
-            questionNumber: "1", opening: "Question", questionType: "other",
-            correctAnswer: "Answer", selectedOptions: [], choicePreviews: [], certainty: "certain"
-        )
-        relay.publish(question: question)
-        let oldSession = relay.snapshot(after: 0).sessionID
-
-        relay.clearQuestions()
-        let cleared = relay.snapshot(after: 0)
-
-        XCTAssertNotEqual(cleared.sessionID, oldSession)
-        XCTAssertEqual(cleared.latestSequence, 0)
-        XCTAssertTrue(cleared.questions.isEmpty)
-    }
-
     func testUncertainQuestionReturnsBestEffortNotificationText() throws {
         let text = #"{"questions":[{"question_number":"8","opening":"Estimate the area","question_type":"other","correct_answer":"approximately 24 cm²","selected_options":[],"choice_previews":[],"certainty":"uncertain"}]}"#
         let result = try OpenAIExamAnalyzer.parseResponse(data: envelope(text), statusCode: 200)

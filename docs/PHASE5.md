@@ -13,7 +13,7 @@ D7WN TCP stream over forced Wi-Fi
     -> short answers followed by full questions in a continuous G2 document
 ```
 
-The native app and the Even plugin do not share process memory. The native app owns camera TCP, cellular OpenAI calls, API-key storage, course selection, notifications, burst capture, and black-screen detection. The Even plugin owns presentation, persisted reading position, the low-frame-rate preview, a contextual menu, and temple input.
+The native app and the Even plugin do not share process memory. The native app owns camera TCP, cellular OpenAI calls, API-key storage, course selection, notifications, and the original black-screen detection flow. The Even plugin only owns answer presentation, persisted reading position, a small contextual menu, and temple scrolling.
 
 ## Routing
 
@@ -30,24 +30,20 @@ The plugin uses `@evenrealities/pretext` to measure the G2 firmware's glyph widt
 
 ## Controls
 
-- With no answers, left click then left long-press: open the mutually exclusive mode selector.
-- In manual mode, left click: collect three frames across one second.
-- In manual mode, left double-click: finish the batch and upload all collected frames together.
-- With answers visible, left click then left long-press: clear all current answers.
 - Swipe down/up: scroll the continuous answer document.
 - Single click: advance approximately one screen.
-- Right double-click: show the system exit confirmation.
-- Contextual menu: switch mode, select either capture mode, clear answers, or refresh.
+- Double-click: show the system exit confirmation.
+- Contextual menu: scroll up/down, clear locally stored answers, or refresh.
 
 ## Physical test
 
-1. Install native build `0.18.0` and the private `Pen-Camera-G2.ehpk` build.
+1. Install native build `0.19.0` and the private `Pen-Camera-G2.ehpk` build.
 2. Open **Pen Camera** from the glasses menu. Leave it waiting for the phone relay.
 3. On iPhone, join `Nax_5cf097da7367`, keep cellular data enabled, and open the native Pen Camera app.
 4. Start the live stream, then tap **Start G2 Analysis**.
 5. Capture a question and cover the lens for the two black-frame confirmations.
-6. Confirm the glasses automatically open the complete question and answer.
-7. Use temple swipe/click controls to visit every page and every received question.
+6. Confirm the glasses show every brief answer first, followed by the complete questions and detailed answers.
+7. Use temple swipe/click controls to scroll the continuous document without page-number navigation.
 8. Confirm OpenAI still succeeds while the iPhone reports that the camera Wi-Fi has no internet connection.
 
 ## Status

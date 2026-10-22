@@ -221,10 +221,6 @@ struct ContentView: View {
                 valueRow("API request", analysis.continuousRequestInFlight ? "In progress" : "Idle")
                 valueRow("Batch uploads", "\(analysis.continuousRequestCount)")
                 valueRow("Current images", "\(analysis.preparedImageCount)")
-                valueRow(
-                    "G2 capture mode",
-                    analysis.captureMode == .manualCapture ? "Manual 3-photo bursts" : "Black-screen detection"
-                )
                 valueRow("G2 questions pushed", "\(analysis.glassesPushCount)")
                 valueRow("Notification pop-ups", "\(analysis.notificationCount)")
                 valueRow("G2 relay", GlassesRelayServer.endpointDescription)
@@ -249,7 +245,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                Text("The G2 can select one capture mode: manual preview with 3-photo bursts, or the original black-screen detection flow. Every batch is uploaded in one cellular API request. Results go to both the G2 and the original iOS notification pop-ups. Keep this app in the foreground while capturing.")
+                Text("The original black-screen detection flow is always active: check every 3 seconds, save visible frames every second, and upload the batch after two black confirmations. Results go to both the G2 and the original iOS notification pop-ups. Keep this app in the foreground while capturing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
