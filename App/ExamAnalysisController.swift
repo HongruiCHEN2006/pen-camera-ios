@@ -68,16 +68,30 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var capturedImage: UIImage?
     @Published private(set) var hasStoredAPIKey = false
     @Published private(set) var cloudRoute: CloudRoute = .cellularRequired
-    @Published private(set) var continuousState: ContinuousState = .stopped
+    @Published private(set) var continuousState: ContinuousState = .stopped {
+        didSet { publishGlassesStatus() }
+    }
     @Published private(set) var continuousRequestCount = 0
     @Published private(set) var glassesPushCount = 0
     @Published private(set) var notificationCount = 0
-    @Published private(set) var continuousRequestInFlight = false
-    @Published private(set) var isCurrentFrameBlack: Bool?
-    @Published private(set) var hasUploadStarted = false
-    @Published private(set) var hasUploadFinished = false
-    @Published private(set) var preparedImageCount = 0
-    @Published private(set) var uploadOutcome: String?
+    @Published private(set) var continuousRequestInFlight = false {
+        didSet { publishGlassesStatus() }
+    }
+    @Published private(set) var isCurrentFrameBlack: Bool? {
+        didSet { publishGlassesStatus() }
+    }
+    @Published private(set) var hasUploadStarted = false {
+        didSet { publishGlassesStatus() }
+    }
+    @Published private(set) var hasUploadFinished = false {
+        didSet { publishGlassesStatus() }
+    }
+    @Published private(set) var preparedImageCount = 0 {
+        didSet { publishGlassesStatus() }
+    }
+    @Published private(set) var uploadOutcome: String? {
+        didSet { publishGlassesStatus() }
+    }
     @Published private(set) var lastContinuousMessage: String?
     @Published private(set) var lastContinuousResult: ExamAnalysisResult?
     @Published var apiKeyDraft = ""
@@ -399,6 +413,24 @@ final class ExamAnalysisController: ObservableObject {
         hasUploadFinished = false
         preparedImageCount = 0
         uploadOutcome = nil
+    }
+
+    private func publishGlassesStatus() {
+        let uploadState: String
+        if continuousRequestInFlight || continuousState == .uploading {
+            uploadState = "uploading"
+        } else if hasUploadFinished {
+            uploadState = uploadOutcome == "成功" ? "success" : "failed"
+        } else if hasUploadStarted {
+            uploadState = "started"
+        } else {
+            uploadState = "not_started"
+        }
+        glassesRelay.updateAnalysisStatus(
+            isBlack: isCurrentFrameBlack,
+            uploadState: uploadState,
+            imageCount: preparedImageCount
+        )
     }
 
     private func failContinuous(_ message: String, sessionID: UUID) {

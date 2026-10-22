@@ -184,6 +184,9 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertFalse(snapshot.camera.connected)
         XCTAssertEqual(snapshot.camera.state, "disconnected")
         XCTAssertNil(snapshot.camera.batteryLevel)
+        XCTAssertNil(snapshot.analysis.isBlack)
+        XCTAssertEqual(snapshot.analysis.uploadState, "not_started")
+        XCTAssertEqual(snapshot.analysis.imageCount, 0)
     }
 
     func testGlassesRelayPublishesCameraConnectionAndOptionalBattery() {
@@ -196,6 +199,17 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(snapshot.camera.state, "connected")
         XCTAssertEqual(snapshot.camera.batteryLevel, 73)
         XCTAssertFalse(snapshot.camera.updatedAt.isEmpty)
+    }
+
+    func testGlassesRelayPublishesBlackScreenUploadAndImageStatus() {
+        let relay = GlassesRelayServer()
+        relay.updateAnalysisStatus(isBlack: true, uploadState: "uploading", imageCount: 8)
+
+        let snapshot = relay.snapshot(after: 0)
+
+        XCTAssertEqual(snapshot.analysis.isBlack, true)
+        XCTAssertEqual(snapshot.analysis.uploadState, "uploading")
+        XCTAssertEqual(snapshot.analysis.imageCount, 8)
     }
 
     func testGlassesRelayGroupsEveryQuestionFromOneUploadBatch() {

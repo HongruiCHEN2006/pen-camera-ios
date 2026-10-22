@@ -27,13 +27,27 @@ struct GlassesQuestionEnvelope: Codable, Equatable, Sendable {
     let sessionID: String
     let latestSequence: Int
     let camera: GlassesCameraStatusPayload
+    let analysis: GlassesAnalysisStatusPayload
     let questions: [GlassesQuestionPayload]
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case latestSequence = "latest_sequence"
         case camera
+        case analysis
         case questions
+    }
+}
+
+struct GlassesAnalysisStatusPayload: Codable, Equatable, Sendable {
+    let isBlack: Bool?
+    let uploadState: String
+    let imageCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case isBlack = "is_black"
+        case uploadState = "upload_state"
+        case imageCount = "image_count"
     }
 }
 
@@ -78,6 +92,11 @@ final class GlassesRelayServer: @unchecked Sendable {
         state: "disconnected",
         batteryLevel: nil,
         updatedAt: ISO8601DateFormatter().string(from: Date())
+    )
+    private var analysisStatus = GlassesAnalysisStatusPayload(
+        isBlack: nil,
+        uploadState: "not_started",
+        imageCount: 0
     )
     private let encoder: JSONEncoder
 
@@ -151,6 +170,7 @@ final class GlassesRelayServer: @unchecked Sendable {
                 sessionID: sessionID,
                 latestSequence: nextSequence - 1,
                 camera: cameraStatus,
+                analysis: analysisStatus,
                 questions: questions.filter { $0.sequence > sequence }
             )
         }
@@ -163,6 +183,16 @@ final class GlassesRelayServer: @unchecked Sendable {
                 state: state,
                 batteryLevel: batteryLevel,
                 updatedAt: ISO8601DateFormatter().string(from: Date())
+            )
+        }
+    }
+
+    func updateAnalysisStatus(isBlack: Bool?, uploadState: String, imageCount: Int) {
+        lock.withLock {
+            analysisStatus = GlassesAnalysisStatusPayload(
+                isBlack: isBlack,
+                uploadState: uploadState,
+                imageCount: max(0, imageCount)
             )
         }
     }

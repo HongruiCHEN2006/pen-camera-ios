@@ -33,6 +33,11 @@ optional because the D7WN protocol has no verified battery command: the native
 app forwards a percentage only if a device-info JSON response exposes a known
 battery field with a value from 0 through 100.
 
+Before answers arrive, the same viewport reports the current black-frame verdict,
+upload state, and number of images collected in the current batch. As soon as an
+answer batch is available, all device/status/footer text is hidden and only the
+quick answers followed by the complete questions and answers remain.
+
 ## Controls
 
 - Swipe down/up: scroll the continuous answer document.
@@ -42,7 +47,7 @@ battery field with a value from 0 through 100.
 
 ## Physical test
 
-1. Install native build `0.20.0` and the private `Pen-Camera-G2.ehpk` build.
+1. Install native build `0.21.0` and the private `Pen-Camera-G2.ehpk` build.
 2. Open **Pen Camera** from the glasses menu. Leave it waiting for the phone relay.
 3. On iPhone, join `Nax_5cf097da7367`, keep cellular data enabled, and open the native Pen Camera app.
 4. Start the live stream, then tap **Start G2 Analysis**.

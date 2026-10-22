@@ -20,6 +20,12 @@ verified stream connection state. It also shows a battery percentage only when
 the camera's device-info response contains a recognized 0–100 battery field;
 otherwise the battery line is omitted.
 
+Before an answer arrives, G2 also shows the black-frame verdict, upload state,
+and current batch image count. Once answers arrive, status and help text disappear
+and the full display is reserved for compact quick answers followed by complete
+questions and answers. The right-temple app menu remains available; click then
+long-press on the left temple clears the locally displayed answers.
+
 These values describe the verified AP-mode setup. Native iOS TCP access, protocol handshake, JPEG reconstruction, live video, local capture, and simultaneous Wi-Fi/cellular split routing are verified on the physical phone.
 
 ## Build locally on macOS

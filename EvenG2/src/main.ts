@@ -1,5 +1,6 @@
 import {
   CreateStartUpPageContainer,
+  EventSourceType,
   MenuContainerProperty,
   MenuItemProperty,
   OsEventTypeList,
@@ -7,17 +8,19 @@ import {
   TextContainerUpgrade,
   waitForEvenAppBridge,
   type EvenAppBridge,
+  type Sys_ItemEvent,
 } from '@evenrealities/even_hub_sdk'
 import { paginate } from './paginate'
 import './style.css'
 
-const APP_VERSION = '0.4.0'
+const APP_VERSION = '0.5.0'
 const RELAY_URL = 'http://127.0.0.1:8765/api/questions'
 const BODY_WIDTH = 576
-const BODY_HEIGHT = 240
+const BODY_HEIGHT = 288
 const BODY_PADDING = 4
 const POLL_INTERVAL_MS = 750
 const MAX_LOCAL_QUESTIONS = 100
+const ARM_WINDOW_MS = 2_500
 
 interface RelayQuestion {
   sequence: number
@@ -35,6 +38,7 @@ interface RelayEnvelope {
   session_id: string
   latest_sequence: number
   camera: CameraStatus
+  analysis: AnalysisStatus
   questions: RelayQuestion[]
 }
 
@@ -43,6 +47,12 @@ interface CameraStatus {
   state: string
   battery_level?: number | null
   updated_at: string
+}
+
+interface AnalysisStatus {
+  is_black?: boolean | null
+  upload_state: 'not_started' | 'started' | 'uploading' | 'success' | 'failed'
+  image_count: number
 }
 
 interface SavedState {
@@ -67,11 +77,17 @@ let cameraStatus: CameraStatus = {
   battery_level: null,
   updated_at: '',
 }
+let analysisStatus: AnalysisStatus = {
+  is_black: null,
+  upload_state: 'not_started',
+  image_count: 0,
+}
 let scrollPosition = 0
 let viewports = ['等待答案']
 let pollTimer: number | undefined
 let rendering: Promise<unknown> = Promise.resolve()
 let stopped = false
+let leftClickArmedUntil = 0
 
 restoreState()
 
@@ -123,13 +139,21 @@ function answerDocument(): string {
     : `相机：${cameraStatus.state === 'connecting' ? '连接中' : cameraStatus.state === 'reconnecting' ? '正在重连' : '未连接'}`
 
   if (questions.length === 0) {
-    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n等待黑屏检测上传结果\n\n滑动滚动 · 单击下移 · 双击退出`
+    const blackLine = `黑屏：${typeof analysisStatus.is_black === 'boolean' ? (analysisStatus.is_black ? '是' : '否') : '待检测'}`
+    const uploadLabels: Record<AnalysisStatus['upload_state'], string> = {
+      not_started: '否',
+      started: '已开始',
+      uploading: '上传中',
+      success: '已完成',
+      failed: '失败',
+    }
+    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n${blackLine}\n上传：${uploadLabels[analysisStatus.upload_state]}\n共计：${analysisStatus.image_count} 张`
   }
 
   const answers = batchGroups().map((batch, batchIndex) => {
     const quickAnswers = batch.map((question) =>
-      `${question.question_number}. ${brief(question.question)}\n大概答案：${question.answer}`,
-    ).join('\n\n')
+      `${question.question_number}. ${brief(question.question)} → ${question.answer}`,
+    ).join('\n')
 
     const fullAnswers = batch.map((question) => {
       const uncertain = question.certainty === 'uncertain' ? '（识别可能不完整）' : ''
@@ -138,7 +162,7 @@ function answerDocument(): string {
 
     return `第 ${batchIndex + 1} 批 · 答案速览\n\n${quickAnswers}\n\n第 ${batchIndex + 1} 批 · 完整题目与具体答案\n\n${fullAnswers}`
   }).join('\n\n════════\n\n')
-  return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n${answers}`
+  return answers
 }
 
 function updateViewports(): void {
@@ -147,12 +171,6 @@ function updateViewports(): void {
     height: BODY_HEIGHT - BODY_PADDING * 2,
   })
   scrollPosition = Math.min(Math.max(0, scrollPosition), viewports.length - 1)
-}
-
-function footer(): string {
-  return questions.length === 0
-    ? `v${APP_VERSION} · 等待答案 · 双击退出`
-    : `共 ${questions.length} 题 · 滑动滚动 · 单击下移`
 }
 
 async function render(): Promise<void> {
@@ -164,12 +182,6 @@ async function render(): Promise<void> {
       containerName: 'answerScroll',
       content: body,
       textColor: 4,
-    }))
-    await bridge.textContainerUpgrade(new TextContainerUpgrade({
-      containerID: 2,
-      containerName: 'answerFooter',
-      content: footer(),
-      textColor: 3,
     }))
   })
   await rendering
@@ -196,6 +208,44 @@ function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeLis
   return envelope.eventType ?? OsEventTypeList.CLICK_EVENT
 }
 
+function eventSourceOf(envelope?: Sys_ItemEvent): EventSourceType | null {
+  return envelope?.eventSource ?? null
+}
+
+function isLeft(source: EventSourceType | null): boolean {
+  return source === EventSourceType.TOUCH_EVENT_FROM_GLASSES_L
+}
+
+function isRight(source: EventSourceType | null): boolean {
+  return source === EventSourceType.TOUCH_EVENT_FROM_GLASSES_R
+}
+
+async function handleGesture(type: OsEventTypeList, source: EventSourceType | null): Promise<void> {
+  if (type === OsEventTypeList.CLICK_EVENT) {
+    if (isLeft(source)) leftClickArmedUntil = Date.now() + ARM_WINDOW_MS
+    scroll(1)
+    return
+  }
+  if (type === OsEventTypeList.LONG_PRESS_EVENT) {
+    if (isLeft(source) && Date.now() <= leftClickArmedUntil) {
+      leftClickArmedUntil = 0
+      clearAnswers()
+    }
+    return
+  }
+  if (type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+    scroll(1)
+    return
+  }
+  if (type === OsEventTypeList.SCROLL_TOP_EVENT) {
+    scroll(-1)
+    return
+  }
+  if (type === OsEventTypeList.DOUBLE_CLICK_EVENT && (isRight(source) || source === null)) {
+    await bridge.shutDownPageContainer(1)
+  }
+}
+
 function isRelayEnvelope(value: unknown): value is RelayEnvelope {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<RelayEnvelope>
@@ -203,6 +253,9 @@ function isRelayEnvelope(value: unknown): value is RelayEnvelope {
     && typeof candidate.latest_sequence === 'number'
     && !!candidate.camera
     && typeof candidate.camera.connected === 'boolean'
+    && !!candidate.analysis
+    && typeof candidate.analysis.upload_state === 'string'
+    && typeof candidate.analysis.image_count === 'number'
     && Array.isArray(candidate.questions)
 }
 
@@ -218,7 +271,9 @@ async function poll(): Promise<void> {
     const payload: unknown = await response.json()
     if (!isRelayEnvelope(payload)) throw new Error('Invalid relay response')
     const cameraChanged = JSON.stringify(cameraStatus) !== JSON.stringify(payload.camera)
+    const analysisChanged = JSON.stringify(analysisStatus) !== JSON.stringify(payload.analysis)
     cameraStatus = payload.camera
+    analysisStatus = payload.analysis
 
     if (sessionID && payload.session_id !== sessionID) {
       sessionID = payload.session_id
@@ -241,7 +296,7 @@ async function poll(): Promise<void> {
         updateViewports()
         scrollPosition = hadQuestions ? Math.min(previousViewportCount, viewports.length - 1) : 0
         await render()
-      } else if (cameraChanged) {
+      } else if (cameraChanged || analysisChanged) {
         await render()
       }
       latestSequence = Math.max(latestSequence, payload.latest_sequence)
@@ -281,19 +336,13 @@ async function start(): Promise<void> {
   bridge = await waitForEvenAppBridge()
   updateViewports()
   const created = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
-    containerTotalNum: 2,
+    containerTotalNum: 1,
     textObject: [
       new TextContainerProperty({
         xPosition: 0, yPosition: 0, width: BODY_WIDTH, height: BODY_HEIGHT,
         borderWidth: 0, paddingLength: BODY_PADDING,
         containerID: 1, containerName: 'answerScroll',
         content: viewports[scrollPosition], textColor: 4, isEventCapture: 1,
-      }),
-      new TextContainerProperty({
-        xPosition: 0, yPosition: 250, width: 576, height: 30,
-        borderWidth: 0, paddingLength: 4,
-        containerID: 2, containerName: 'answerFooter',
-        content: footer(), textColor: 3, isEventCapture: 0,
       }),
     ],
     menuObject: menu(),
@@ -303,13 +352,7 @@ async function start(): Promise<void> {
   const unsubscribe = bridge.onEvenHubEvent((event) => {
     const envelope = event.sysEvent ?? event.textEvent ?? event.listEvent
     const type = eventTypeOf(envelope)
-    if (type === OsEventTypeList.CLICK_EVENT || type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-      scroll(1)
-    } else if (type === OsEventTypeList.SCROLL_TOP_EVENT) {
-      scroll(-1)
-    } else if (type === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      void bridge.shutDownPageContainer(1)
-    }
+    if (type !== null) void handleGesture(type, eventSourceOf(event.sysEvent))
 
     switch (event.menuItemClickEvent?.itemID) {
     case 1: scroll(-1); break

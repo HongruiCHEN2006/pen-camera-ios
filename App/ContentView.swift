@@ -272,6 +272,9 @@ struct ContentView: View {
                 if let firmware = camera.firmware {
                     valueRow("Reported firmware", firmware)
                 }
+                if let batteryLevel = camera.batteryLevel {
+                    valueRow("Reported battery", "\(batteryLevel)%")
+                }
                 if let date = camera.lastFrameAt {
                     valueRow("Latest frame", date.formatted(date: .omitted, time: .standard))
                 }
