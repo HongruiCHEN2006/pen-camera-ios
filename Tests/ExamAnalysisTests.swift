@@ -96,12 +96,34 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertFalse(instructions.contains("CS 0447"))
     }
 
+    func testIntroMarketingRequestUsesCourseFrameworkAndSharedSchemaRules() throws {
+        let request = try OpenAIExamAnalyzer.makeRequest(
+            jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+            apiKey: "sk-test-only",
+            model: OpenAIExamAnalyzer.defaultModel,
+            profile: .introMarketing
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let instructions = try XCTUnwrap(object["instructions"] as? String)
+
+        XCTAssertTrue(instructions.contains("Introduction to Marketing"))
+        XCTAssertTrue(instructions.contains("Chapter 7 — Marketing Research"))
+        XCTAssertTrue(instructions.contains("Four I's of services"))
+        XCTAssertTrue(instructions.contains("four pricing orientations"))
+        XCTAssertTrue(instructions.contains("Break-Even Quantity"))
+        XCTAssertTrue(instructions.contains("Never invent an unavailable professor preference"))
+        XCTAssertTrue(instructions.contains("Return only JSON matching the supplied schema"))
+        XCTAssertFalse(instructions.contains("CS 0447"))
+    }
+
     func testAllAnalysisProfilesAppearInCategoryPickerOrder() {
         XCTAssertEqual(
             AnalysisProfile.allCases,
-            [.general, .cs0447, .introPsychology]
+            [.general, .cs0447, .introPsychology, .introMarketing]
         )
         XCTAssertEqual(AnalysisProfile.introPsychology.displayName, "Intro to Psychology")
+        XCTAssertEqual(AnalysisProfile.introMarketing.displayName, "Intro to Marketing")
     }
 
     func testParsesMultipleLetterChoicesAndRemovesDuplicatesWithinBatch() throws {
