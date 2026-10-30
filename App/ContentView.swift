@@ -191,15 +191,12 @@ struct ContentView: View {
     private var analysisProfilePicker: some View {
         GroupBox("Question category") {
             VStack(alignment: .leading, spacing: 8) {
-                Picker("Category", selection: $analysis.analysisProfile) {
-                    ForEach(AnalysisProfile.allCases) { profile in
-                        Text(profile.displayName).tag(profile)
-                    }
-                }
-                .pickerStyle(.menu)
-                .disabled(analysis.isAnalyzing || analysis.isContinuousActive)
-
+                valueRow("Prompt", analysis.analysisProfile.displayName)
+                valueRow("Upload mode", analysis.uploadMode.displayName)
                 Text(analysis.analysisProfile.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Change the prompt and API upload mode from the Pen Camera menu on Even G2.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -214,6 +211,7 @@ struct ContentView: View {
                 valueRow("API Key", analysis.hasStoredAPIKey ? "Stored in Keychain" : "Not configured")
                 valueRow("Model", analysis.model)
                 valueRow("Category", analysis.analysisProfile.displayName)
+                valueRow("Upload mode", analysis.uploadMode.displayName)
                 valueRow("Camera route", camera.routeStatus)
                 valueRow("Cloud route", analysis.cloudRoute.title)
                 valueRow("Continuous", analysis.continuousState.title)

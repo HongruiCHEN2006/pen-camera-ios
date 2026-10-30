@@ -96,12 +96,22 @@ final class ExamAnalysisController: ObservableObject {
     @Published private(set) var lastContinuousResult: ExamAnalysisResult?
     @Published var apiKeyDraft = ""
     @Published var model: String
-    @Published var analysisProfile: AnalysisProfile {
-        didSet { preferences.set(analysisProfile.rawValue, forKey: Self.profilePreferenceKey) }
+    @Published private(set) var analysisProfile: AnalysisProfile {
+        didSet {
+            preferences.set(analysisProfile.rawValue, forKey: Self.profilePreferenceKey)
+            glassesRelay.updateConfiguration(profile: analysisProfile, uploadMode: uploadMode)
+        }
+    }
+    @Published private(set) var uploadMode: AnalysisUploadMode {
+        didSet {
+            preferences.set(uploadMode.rawValue, forKey: Self.uploadModePreferenceKey)
+            glassesRelay.updateConfiguration(profile: analysisProfile, uploadMode: uploadMode)
+        }
     }
     @Published private(set) var settingsMessage: String?
 
     private static let profilePreferenceKey = "analysis-profile"
+    private static let uploadModePreferenceKey = "analysis-upload-mode"
     private let keychain = KeychainStore(service: "com.hongrui.pencamera.openai", account: "api-key")
     private let analyzer: OpenAIExamAnalyzer
     private let glassesRelay: GlassesRelayServer
@@ -112,7 +122,6 @@ final class ExamAnalysisController: ObservableObject {
     private var monitorTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
     private var continuousSessionID: UUID?
-    private var continuousAnalysisProfile: AnalysisProfile?
     private var currentBatch: CameraBatchCapture?
     var onBatchCompleted: ((Bool) -> Void)?
 
@@ -128,6 +137,17 @@ final class ExamAnalysisController: ObservableObject {
         analysisProfile = AnalysisProfile(
             rawValue: preferences.string(forKey: Self.profilePreferenceKey) ?? ""
         ) ?? .general
+        uploadMode = AnalysisUploadMode(
+            rawValue: preferences.string(forKey: Self.uploadModePreferenceKey) ?? ""
+        ) ?? .images
+        glassesRelay.updateConfiguration(profile: analysisProfile, uploadMode: uploadMode)
+        glassesRelay.setConfigurationChangeHandler { [weak self] profile, uploadMode in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let profile { self.analysisProfile = profile }
+                if let uploadMode { self.uploadMode = uploadMode }
+            }
+        }
         refreshKeyStatus()
     }
 
@@ -219,7 +239,6 @@ final class ExamAnalysisController: ObservableObject {
 
         let sessionID = UUID()
         continuousSessionID = sessionID
-        continuousAnalysisProfile = analysisProfile
         continuousState = .startingGlassesRelay
         resetCycleDisplay()
         lastContinuousMessage = "Starting the local Even G2 question relay."
@@ -250,7 +269,6 @@ final class ExamAnalysisController: ObservableObject {
 
     func stopContinuous(message: String = "Analysis stopped.") {
         continuousSessionID = nil
-        continuousAnalysisProfile = nil
         monitorTask?.cancel()
         uploadTask?.cancel()
         monitorTask = nil
@@ -305,11 +323,24 @@ final class ExamAnalysisController: ObservableObject {
                             continuousState = .recording
                         }
                         if let batch = currentBatch {
-                            _ = try batch.append(sample.jpeg)
+                            let appended = try batch.append(sample.jpeg)
                             preparedImageCount = batch.images.count
                             BackgroundCaptureCoordinator.shared.reportProgress(
                                 imageCount: preparedImageCount, uploading: false
                             )
+                            if appended {
+                                let frameIndex = batch.images.count
+                                do {
+                                    let frame = try await AppleVisionOCR.recognize(
+                                        jpeg: sample.jpeg, frameIndex: frameIndex
+                                    )
+                                    guard isCurrentSession(sessionID), currentBatch === batch else { return }
+                                    batch.appendOCR(frame)
+                                    glassesRelay.updateOCRPreview(frame)
+                                } catch {
+                                    lastContinuousMessage = "Apple Vision OCR failed for frame \(frameIndex): \(error.localizedDescription)"
+                                }
+                            }
                         }
                         lastContinuousMessage = "Recording \(preparedImageCount) image(s)."
                     } catch BatchCaptureError.limitReached {
@@ -353,7 +384,6 @@ final class ExamAnalysisController: ObservableObject {
         defer { try? batch.remove() }
         guard !batch.images.isEmpty, isCurrentSession(sessionID) else { return }
         do {
-            let images = try batch.readImages()
             let key = try loadAPIKey()
             guard isCurrentSession(sessionID), !Task.isCancelled else { return }
             continuousRequestCount += 1
@@ -362,10 +392,25 @@ final class ExamAnalysisController: ObservableObject {
             hasUploadFinished = false
             uploadOutcome = nil
             cloudRoute = .connecting
-            let selectedProfile = continuousAnalysisProfile ?? analysisProfile
-            let result = try await analyzer.analyze(
-                jpegs: images, apiKey: key, model: model, profile: selectedProfile
-            )
+            let selectedProfile = analysisProfile
+            let selectedUploadMode = uploadMode
+            let result: ExamAnalysisResult
+            switch selectedUploadMode {
+            case .images:
+                result = try await analyzer.analyze(
+                    jpegs: batch.readImages(),
+                    apiKey: key,
+                    model: model,
+                    profile: selectedProfile
+                )
+            case .appleVision:
+                result = try await analyzer.analyze(
+                    ocrFrames: batch.ocrFrames,
+                    apiKey: key,
+                    model: model,
+                    profile: selectedProfile
+                )
+            }
             guard isCurrentSession(sessionID), !Task.isCancelled else { return }
             continuousRequestInFlight = false
             hasUploadFinished = true
@@ -413,6 +458,7 @@ final class ExamAnalysisController: ObservableObject {
         hasUploadFinished = false
         preparedImageCount = 0
         uploadOutcome = nil
+        glassesRelay.updateOCRPreview(nil)
     }
 
     private func publishGlassesStatus() {
@@ -455,7 +501,7 @@ final class ExamAnalysisController: ObservableObject {
         switch error {
         case .api, .refusal, .missingOutput, .malformedStructuredOutput:
             cloudRoute = .cellularVerified
-        case .invalidAPIKey, .invalidModel, .emptyBatch, .invalidHTTPResponse:
+        case .invalidAPIKey, .invalidModel, .emptyBatch, .emptyOCR, .invalidHTTPResponse:
             cloudRoute = .cellularRequired
         }
     }

@@ -47,6 +47,7 @@ enum OpenAIExamError: LocalizedError, Equatable {
     case invalidAPIKey
     case invalidModel
     case emptyBatch
+    case emptyOCR
     case invalidHTTPResponse
     case api(statusCode: Int, message: String)
     case refusal(String)
@@ -58,6 +59,7 @@ enum OpenAIExamError: LocalizedError, Equatable {
         case .invalidAPIKey: "OpenAI API Key is empty. Open Settings and save a key first."
         case .invalidModel: "The model name is empty."
         case .emptyBatch: "No camera images are available for analysis."
+        case .emptyOCR: "Apple Vision did not recognize any English text to analyze."
         case .invalidHTTPResponse: "OpenAI returned an invalid HTTP response."
         case let .api(statusCode, message): "OpenAI API error \(statusCode): \(message)"
         case let .refusal(message): "The model declined the image request: \(message)"
@@ -93,6 +95,19 @@ actor OpenAIExamAnalyzer {
         return try Self.parseResponse(data: response.body, statusCode: response.statusCode)
     }
 
+    func analyze(
+        ocrFrames: [AppleVisionOCRFrame],
+        apiKey: String,
+        model: String,
+        profile: AnalysisProfile = .general
+    ) async throws -> ExamAnalysisResult {
+        let request = try Self.makeOCRRequest(
+            frames: ocrFrames, apiKey: apiKey, model: model, profile: profile
+        )
+        let response = try await cellularClient.send(request)
+        return try Self.parseResponse(data: response.body, statusCode: response.statusCode)
+    }
+
     static func makeRequest(
         jpeg: Data, apiKey: String, model: String, profile: AnalysisProfile = .general
     ) throws -> URLRequest {
@@ -119,11 +134,64 @@ actor OpenAIExamAnalyzer {
                 "detail": "high"
             ])
         }
+        return try makeRequest(
+            content: content,
+            instructions: profile.instructions,
+            apiKey: cleanKey,
+            model: cleanModel
+        )
+    }
+
+    static func makeOCRRequest(
+        frames: [AppleVisionOCRFrame],
+        apiKey: String,
+        model: String,
+        profile: AnalysisProfile = .general
+    ) throws -> URLRequest {
+        guard !frames.isEmpty, frames.contains(where: { !$0.blocks.isEmpty }) else {
+            throw OpenAIExamError.emptyOCR
+        }
+        guard apiKey.rangeOfCharacter(from: .newlines) == nil else {
+            throw OpenAIExamError.invalidAPIKey
+        }
+        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else { throw OpenAIExamError.invalidAPIKey }
+        guard !cleanModel.isEmpty else { throw OpenAIExamError.invalidModel }
+
+        let frameText = frames.sorted { $0.frameIndex < $1.frameIndex }
+            .map(\.apiText)
+            .joined(separator: "\n\n")
+        let instructions = profile.instructions + """
+
+
+        APPLE VISION OCR MODE OVERRIDE
+
+        The user input contains chronological Apple Vision OCR frames rather than original images. Each text block includes normalized top-left x/y position, width, height, and OCR confidence. Where the shared rules refer to supplied images, apply those rules to these OCR frames. Use frame order and coordinates to reconstruct questions and answer choices across screenshots, remove overlapping repeated text, and preserve printed option identifiers. OCR may contain recognition errors. Do not invent missing visual content. If a material character or layout relationship remains ambiguous, use certainty="uncertain"; skip only when the OCR fragments cannot form a coherent answerable question.
+        """
+        let content: [[String: Any]] = [[
+            "type": "input_text",
+            "text": frameText
+        ]]
+        return try makeRequest(
+            content: content,
+            instructions: instructions,
+            apiKey: cleanKey,
+            model: cleanModel
+        )
+    }
+
+    private static func makeRequest(
+        content: [[String: Any]],
+        instructions: String,
+        apiKey: String,
+        model: String
+    ) throws -> URLRequest {
         let body: [String: Any] = [
-            "model": cleanModel,
+            "model": model,
             "reasoning": ["effort": "medium"],
             "store": false,
-            "instructions": profile.instructions,
+            "instructions": instructions,
             "input": [["role": "user", "content": content]],
             "text": ["format": [
                 "type": "json_schema",
@@ -137,7 +205,7 @@ actor OpenAIExamAnalyzer {
         request.httpMethod = "POST"
         request.timeoutInterval = 90
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }

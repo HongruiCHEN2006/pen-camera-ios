@@ -13,7 +13,7 @@ D7WN TCP stream over forced Wi-Fi
     -> short answers followed by full questions in a continuous G2 document
 ```
 
-The native app and the Even plugin do not share process memory. The native app owns camera TCP, cellular OpenAI calls, API-key storage, course selection, notifications, and the original black-screen detection flow. The Even plugin only owns answer presentation, persisted reading position, a small contextual menu, and temple scrolling.
+The native app and the Even plugin do not share process memory. The native app owns camera TCP, cellular OpenAI calls, API-key storage, notifications, Apple Vision OCR, and the original black-screen detection flow. The Even plugin owns answer/OCR presentation, course and upload-mode selection, persisted reading position, a contextual menu, and temple scrolling. Settings selected on G2 are sent to the native app through the loopback relay.
 
 ## Routing
 
@@ -33,21 +33,33 @@ optional because the D7WN protocol has no verified battery command: the native
 app forwards a percentage only if a device-info JSON response exposes a known
 battery field with a value from 0 through 100.
 
-Before answers arrive, the same viewport reports the current black-frame verdict,
-upload state, and number of images collected in the current batch. As soon as an
-answer batch is available, all device/status/footer text is hidden and only the
-quick answers followed by the complete questions and answers remain.
+The header always shows the selected course profile, upload mode, and G2 app
+version. While a non-black batch is being captured, the viewport shows the image
+count and the latest Apple Vision `.accurate` English OCR result at an approximate
+version of its original normalized position. OCR runs once for every distinct JPEG
+saved by the existing one-second sampler. Black frames never run OCR.
+
+During black confirmation and upload, the viewport reports the current black-frame
+verdict, whether upload has started/finished, and the number of images collected.
+As soon as an answer batch is available, device/status text is hidden and only the
+quick answers followed by the complete questions and answers remain below the
+persistent configuration header.
+
+`Images` mode sends the saved original JPEGs to OpenAI; OCR is preview-only.
+`Apple Vision` mode sends chronological OCR blocks with normalized positions and
+confidence instead of image data. Both modes OCR the exact same saved screenshots.
 
 ## Controls
 
 - Swipe down/up: scroll the continuous answer document.
 - Single click: advance approximately one screen.
 - Double-click: show the system exit confirmation.
-- Contextual menu: scroll up/down, clear locally stored answers, or refresh.
+- Contextual menu: select course model, select `Images`/`Apple Vision` upload mode,
+  scroll up/down, clear locally stored answers, or refresh.
 
 ## Physical test
 
-1. Install native build `0.21.0` and the private `Pen-Camera-G2.ehpk` build.
+1. Install native build `0.24.0` and the private `Pen-Camera-G2.ehpk` build.
 2. Open **Pen Camera** from the glasses menu. Leave it waiting for the phone relay.
 3. On iPhone, join `Nax_5cf097da7367`, keep cellular data enabled, and open the native Pen Camera app.
 4. Start the live stream, then tap **Start G2 Analysis**.

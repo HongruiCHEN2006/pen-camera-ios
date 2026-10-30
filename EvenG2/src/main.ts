@@ -13,11 +13,13 @@ import {
 import { paginate } from './paginate'
 import './style.css'
 
-const APP_VERSION = '0.6.0'
-const RELAY_URL = 'http://127.0.0.1:8765/api/questions'
+const APP_VERSION = '0.7.0'
+const RELAY_BASE = 'http://127.0.0.1:8765'
+const RELAY_URL = `${RELAY_BASE}/api/questions`
 const BODY_WIDTH = 576
 const BODY_HEIGHT = 288
 const BODY_PADDING = 4
+const HEADER_HEIGHT = 27
 const POLL_INTERVAL_MS = 750
 const MAX_LOCAL_QUESTIONS = 100
 const ARM_WINDOW_MS = 2_500
@@ -39,7 +41,30 @@ interface RelayEnvelope {
   latest_sequence: number
   camera: CameraStatus
   analysis: AnalysisStatus
+  settings: RelaySettings
+  ocr_preview?: OCRFrame | null
   questions: RelayQuestion[]
+}
+
+interface RelaySettings {
+  profile: string
+  profile_name: string
+  upload_mode: 'images' | 'apple_vision'
+  upload_mode_name: string
+}
+
+interface OCRBlock {
+  text: string
+  confidence: number
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface OCRFrame {
+  frame_index: number
+  blocks: OCRBlock[]
 }
 
 interface CameraStatus {
@@ -62,6 +87,20 @@ interface SavedState {
   scrollPosition: number
 }
 
+type ViewKind = 'main' | 'profile_picker' | 'upload_picker'
+
+const PROFILE_OPTIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'cs0447', label: 'CS 0447' },
+  { value: 'introPsychology', label: 'Intro to Psychology' },
+  { value: 'introMarketing', label: 'Intro to Marketing' },
+] as const
+
+const UPLOAD_OPTIONS = [
+  { value: 'images', label: 'Images' },
+  { value: 'apple_vision', label: 'Apple Vision' },
+] as const
+
 const connectionElement = requiredElement<HTMLElement>('#connection')
 const questionCountElement = requiredElement<HTMLElement>('#question-count')
 const pageCountElement = requiredElement<HTMLElement>('#page-count')
@@ -82,6 +121,15 @@ let analysisStatus: AnalysisStatus = {
   upload_state: 'not_started',
   image_count: 0,
 }
+let settings: RelaySettings = {
+  profile: 'general',
+  profile_name: 'General',
+  upload_mode: 'images',
+  upload_mode_name: 'Images',
+}
+let ocrPreview: OCRFrame | null = null
+let view: ViewKind = 'main'
+let pickerIndex = 0
 let scrollPosition = 0
 let viewports = ['等待答案']
 let pollTimer: number | undefined
@@ -100,12 +148,43 @@ function requiredElement<T extends Element>(selector: string): T {
 function menu(): MenuContainerProperty {
   return new MenuContainerProperty({
     menuItems: [
-      new MenuItemProperty({ itemName: '向上滚动', itemID: 1 }),
-      new MenuItemProperty({ itemName: '向下滚动', itemID: 2 }),
-      new MenuItemProperty({ itemName: '清空答案', itemID: 3 }),
-      new MenuItemProperty({ itemName: '刷新', itemID: 4 }),
+      new MenuItemProperty({ itemName: 'Select Model', itemID: 1 }),
+      new MenuItemProperty({ itemName: 'Select Upload Mode', itemID: 2 }),
+      new MenuItemProperty({ itemName: '向上滚动', itemID: 3 }),
+      new MenuItemProperty({ itemName: '向下滚动', itemID: 4 }),
+      new MenuItemProperty({ itemName: '清空答案', itemID: 5 }),
+      new MenuItemProperty({ itemName: '刷新', itemID: 6 }),
     ],
   })
+}
+
+function header(): string {
+  return `${settings.profile_name} · ${settings.upload_mode_name} · v${APP_VERSION}`
+}
+
+function ocrLayout(frame: OCRFrame): string {
+  const rows = 7
+  const columns = 44
+  const grid = Array.from({ length: rows }, () => Array<string>(columns).fill(' '))
+  const blocks = [...frame.blocks].sort((left, right) => left.y - right.y || left.x - right.x)
+  for (const block of blocks) {
+    const row = Math.min(rows - 1, Math.max(0, Math.floor(block.y * rows)))
+    const start = Math.min(columns - 1, Math.max(0, Math.floor(block.x * columns)))
+    const available = columns - start
+    const text = block.text.replace(/\s+/gu, ' ').trim().slice(0, available)
+    for (let index = 0; index < text.length; index += 1) {
+      const column = start + index
+      if (grid[row][column] === ' ') grid[row][column] = text[index]
+    }
+  }
+  return grid.map((row) => row.join('').trimEnd()).join('\n').trimEnd()
+}
+
+function pickerDocument(): string {
+  const options = view === 'profile_picker' ? PROFILE_OPTIONS : UPLOAD_OPTIONS
+  const title = view === 'profile_picker' ? 'Select Model' : 'Select Upload Mode'
+  const lines = options.map((option, index) => `${index === pickerIndex ? '▶' : ' '} ${option.label}`)
+  return `${title}\n${lines.join('\n')}\n\n上下滑动选择 · 单击确认`
 }
 
 function brief(text: string): string {
@@ -134,12 +213,15 @@ function batchGroups(): RelayQuestion[][] {
 }
 
 function answerDocument(): string {
+  if (view !== 'main') return pickerDocument()
+
   const cameraLine = cameraStatus.connected
     ? `相机：已连接${typeof cameraStatus.battery_level === 'number' ? ` · 电量 ${cameraStatus.battery_level}%` : ''}`
     : `相机：${cameraStatus.state === 'connecting' ? '连接中' : cameraStatus.state === 'reconnecting' ? '正在重连' : '未连接'}`
 
   const showingUploadStatus = analysisStatus.upload_state !== 'not_started'
-  if (questions.length === 0 || showingUploadStatus) {
+    || (analysisStatus.is_black === true && analysisStatus.image_count > 0)
+  if (showingUploadStatus) {
     const isBlack = typeof analysisStatus.is_black === 'boolean'
       ? (analysisStatus.is_black ? '是' : '否')
       : '待检测'
@@ -147,7 +229,21 @@ function answerDocument(): string {
     const hasFinished = analysisStatus.upload_state === 'success'
       ? '是（成功）'
       : analysisStatus.upload_state === 'failed' ? '是（失败）' : '否'
-    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n是否黑屏：${isBlack}\n开始上传：${hasStarted}\n结束上传：${hasFinished}\n共计图片：${analysisStatus.image_count} 张`
+    return `${cameraLine}\n\n是否黑屏：${isBlack}\n开始上传：${hasStarted}\n结束上传：${hasFinished}\n共计图片：${analysisStatus.image_count} 张`
+  }
+
+  if (analysisStatus.is_black === false && analysisStatus.image_count > 0) {
+    const preview = ocrPreview && ocrPreview.blocks.length > 0
+      ? ocrLayout(ocrPreview)
+      : 'Apple Vision 正在识别本张截图…'
+    return `共计图片：${analysisStatus.image_count} 张\n\n${preview}`
+  }
+
+  if (questions.length === 0) {
+    const isBlack = typeof analysisStatus.is_black === 'boolean'
+      ? (analysisStatus.is_black ? '是' : '否')
+      : '待检测'
+    return `${cameraLine}\n\n是否黑屏：${isBlack}\n开始上传：否\n结束上传：否\n共计图片：${analysisStatus.image_count} 张`
   }
 
   const answers = batchGroups().map((batch, batchIndex) => {
@@ -168,14 +264,15 @@ function answerDocument(): string {
 function updateViewports(): void {
   viewports = paginate(answerDocument(), {
     width: BODY_WIDTH - BODY_PADDING * 2,
-    height: BODY_HEIGHT - BODY_PADDING * 2,
+    height: BODY_HEIGHT - BODY_PADDING * 2 - HEADER_HEIGHT,
   })
   scrollPosition = Math.min(Math.max(0, scrollPosition), viewports.length - 1)
 }
 
 async function render(): Promise<void> {
   updateViewports()
-  const body = viewports[scrollPosition] ?? '等待答案'
+  const viewport = viewports[scrollPosition] ?? '等待答案'
+  const body = `${header()}\n${viewport}`
   rendering = rendering.then(async () => {
     await bridge.textContainerUpgrade(new TextContainerUpgrade({
       containerID: 1,
@@ -192,6 +289,12 @@ async function render(): Promise<void> {
 }
 
 function scroll(offset: number): void {
+  if (view !== 'main') {
+    const length = view === 'profile_picker' ? PROFILE_OPTIONS.length : UPLOAD_OPTIONS.length
+    pickerIndex = (pickerIndex + offset + length) % length
+    void render()
+    return
+  }
   updateViewports()
   scrollPosition = Math.min(viewports.length - 1, Math.max(0, scrollPosition + offset))
   void render()
@@ -201,6 +304,29 @@ function clearAnswers(): void {
   questions = []
   scrollPosition = 0
   void render()
+}
+
+async function selectSetting(): Promise<void> {
+  if (view === 'profile_picker') {
+    const option = PROFILE_OPTIONS[pickerIndex]
+    const response = await fetch(
+      `${RELAY_BASE}/api/settings/profile?value=${encodeURIComponent(option.value)}`,
+      { method: 'POST', signal: AbortSignal.timeout(2_500) },
+    )
+    if (!response.ok) throw new Error(`Profile update failed: HTTP ${response.status}`)
+    settings = { ...settings, profile: option.value, profile_name: option.label }
+  } else if (view === 'upload_picker') {
+    const option = UPLOAD_OPTIONS[pickerIndex]
+    const response = await fetch(
+      `${RELAY_BASE}/api/settings/upload-mode?value=${encodeURIComponent(option.value)}`,
+      { method: 'POST', signal: AbortSignal.timeout(2_500) },
+    )
+    if (!response.ok) throw new Error(`Upload mode update failed: HTTP ${response.status}`)
+    settings = { ...settings, upload_mode: option.value, upload_mode_name: option.label }
+  }
+  view = 'main'
+  scrollPosition = 0
+  await render()
 }
 
 function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
@@ -222,6 +348,10 @@ function isRight(source: EventSourceType | null): boolean {
 
 async function handleGesture(type: OsEventTypeList, source: EventSourceType | null): Promise<void> {
   if (type === OsEventTypeList.CLICK_EVENT) {
+    if (view !== 'main') {
+      await selectSetting()
+      return
+    }
     if (isLeft(source)) leftClickArmedUntil = Date.now() + ARM_WINDOW_MS
     scroll(1)
     return
@@ -242,6 +372,12 @@ async function handleGesture(type: OsEventTypeList, source: EventSourceType | nu
     return
   }
   if (type === OsEventTypeList.DOUBLE_CLICK_EVENT && (isRight(source) || source === null)) {
+    if (view !== 'main') {
+      view = 'main'
+      scrollPosition = 0
+      await render()
+      return
+    }
     await bridge.shutDownPageContainer(1)
   }
 }
@@ -256,6 +392,9 @@ function isRelayEnvelope(value: unknown): value is RelayEnvelope {
     && !!candidate.analysis
     && typeof candidate.analysis.upload_state === 'string'
     && typeof candidate.analysis.image_count === 'number'
+    && !!candidate.settings
+    && typeof candidate.settings.profile === 'string'
+    && typeof candidate.settings.upload_mode === 'string'
     && Array.isArray(candidate.questions)
 }
 
@@ -272,8 +411,12 @@ async function poll(): Promise<void> {
     if (!isRelayEnvelope(payload)) throw new Error('Invalid relay response')
     const cameraChanged = JSON.stringify(cameraStatus) !== JSON.stringify(payload.camera)
     const analysisChanged = JSON.stringify(analysisStatus) !== JSON.stringify(payload.analysis)
+    const settingsChanged = JSON.stringify(settings) !== JSON.stringify(payload.settings)
+    const ocrChanged = JSON.stringify(ocrPreview) !== JSON.stringify(payload.ocr_preview ?? null)
     cameraStatus = payload.camera
     analysisStatus = payload.analysis
+    settings = payload.settings
+    ocrPreview = payload.ocr_preview ?? null
 
     if (sessionID && payload.session_id !== sessionID) {
       sessionID = payload.session_id
@@ -296,7 +439,7 @@ async function poll(): Promise<void> {
         updateViewports()
         scrollPosition = hadQuestions ? Math.min(previousViewportCount, viewports.length - 1) : 0
         await render()
-      } else if (cameraChanged || analysisChanged) {
+      } else if (cameraChanged || analysisChanged || settingsChanged || ocrChanged) {
         await render()
       }
       latestSequence = Math.max(latestSequence, payload.latest_sequence)
@@ -350,17 +493,33 @@ async function start(): Promise<void> {
   if (created !== 0) throw new Error(`Even G2 page creation failed: ${String(created)}`)
 
   const unsubscribe = bridge.onEvenHubEvent((event) => {
+    const menuItem = event.menuItemClickEvent?.itemID
+    if (menuItem !== undefined) {
+      switch (menuItem) {
+      case 1:
+        view = 'profile_picker'
+        pickerIndex = Math.max(0, PROFILE_OPTIONS.findIndex((option) => option.value === settings.profile))
+        scrollPosition = 0
+        void render()
+        break
+      case 2:
+        view = 'upload_picker'
+        pickerIndex = Math.max(0, UPLOAD_OPTIONS.findIndex((option) => option.value === settings.upload_mode))
+        scrollPosition = 0
+        void render()
+        break
+      case 3: scroll(-1); break
+      case 4: scroll(1); break
+      case 5: clearAnswers(); break
+      case 6: void poll(); break
+      default: break
+      }
+      return
+    }
+
     const envelope = event.sysEvent ?? event.textEvent ?? event.listEvent
     const type = eventTypeOf(envelope)
     if (type !== null) void handleGesture(type, eventSourceOf(event.sysEvent))
-
-    switch (event.menuItemClickEvent?.itemID) {
-    case 1: scroll(-1); break
-    case 2: scroll(1); break
-    case 3: clearAnswers(); break
-    case 4: void poll(); break
-    default: break
-    }
 
     const sysType = eventTypeOf(event.sysEvent)
     if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {

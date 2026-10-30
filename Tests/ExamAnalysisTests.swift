@@ -53,6 +53,55 @@ final class ExamAnalysisTests: XCTestCase {
         ])
     }
 
+    func testAppleVisionRequestUsesChronologicalPositionedTextWithoutImages() throws {
+        let frames = [
+            AppleVisionOCRFrame(frameIndex: 2, blocks: [
+                AppleVisionTextBlock(
+                    text: "B. Secondary data", confidence: 0.91,
+                    x: 0.12, y: 0.42, width: 0.6, height: 0.08
+                )
+            ]),
+            AppleVisionOCRFrame(frameIndex: 1, blocks: [
+                AppleVisionTextBlock(
+                    text: "Which source was collected previously?", confidence: 0.98,
+                    x: 0.08, y: 0.10, width: 0.82, height: 0.08
+                )
+            ])
+        ]
+
+        let request = try OpenAIExamAnalyzer.makeOCRRequest(
+            frames: frames,
+            apiKey: "sk-test-only",
+            model: OpenAIExamAnalyzer.defaultModel,
+            profile: .introMarketing
+        )
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let instructions = try XCTUnwrap(object["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("APPLE VISION OCR MODE OVERRIDE"))
+        XCTAssertTrue(instructions.contains("Introduction to Marketing"))
+
+        let input = try XCTUnwrap(object["input"] as? [[String: Any]])
+        let content = try XCTUnwrap(input.first?["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 1)
+        XCTAssertEqual(content.first?["type"] as? String, "input_text")
+        let text = try XCTUnwrap(content.first?["text"] as? String)
+        XCTAssertLessThan(try XCTUnwrap(text.range(of: "FRAME 1")?.lowerBound),
+                          try XCTUnwrap(text.range(of: "FRAME 2")?.lowerBound))
+        XCTAssertTrue(text.contains("x=0.0800"))
+        XCTAssertFalse(text.contains("input_image"))
+    }
+
+    func testAppleVisionRequestRejectsFramesWithoutRecognizedText() {
+        XCTAssertThrowsError(try OpenAIExamAnalyzer.makeOCRRequest(
+            frames: [AppleVisionOCRFrame(frameIndex: 1, blocks: [])],
+            apiKey: "sk-test-only",
+            model: OpenAIExamAnalyzer.defaultModel
+        )) {
+            XCTAssertEqual($0 as? OpenAIExamError, .emptyOCR)
+        }
+    }
+
     func testCS0447RequestUsesDedicated32BitMIPSInstructionsWithoutRetrieval() throws {
         let request = try OpenAIExamAnalyzer.makeRequest(
             jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]),
@@ -209,6 +258,9 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertNil(snapshot.analysis.isBlack)
         XCTAssertEqual(snapshot.analysis.uploadState, "not_started")
         XCTAssertEqual(snapshot.analysis.imageCount, 0)
+        XCTAssertEqual(snapshot.settings.profile, AnalysisProfile.general.rawValue)
+        XCTAssertEqual(snapshot.settings.uploadMode, AnalysisUploadMode.images.rawValue)
+        XCTAssertNil(snapshot.ocrPreview)
     }
 
     func testGlassesRelayPublishesCameraConnectionAndOptionalBattery() {
@@ -232,6 +284,24 @@ final class ExamAnalysisTests: XCTestCase {
         XCTAssertEqual(snapshot.analysis.isBlack, true)
         XCTAssertEqual(snapshot.analysis.uploadState, "uploading")
         XCTAssertEqual(snapshot.analysis.imageCount, 8)
+    }
+
+    func testGlassesRelayPublishesSettingsAndLatestOCRPreview() {
+        let relay = GlassesRelayServer()
+        let frame = AppleVisionOCRFrame(frameIndex: 3, blocks: [
+            AppleVisionTextBlock(
+                text: "Price elasticity", confidence: 0.95,
+                x: 0.1, y: 0.2, width: 0.5, height: 0.1
+            )
+        ])
+        relay.updateConfiguration(profile: .introMarketing, uploadMode: .appleVision)
+        relay.updateOCRPreview(frame)
+
+        let snapshot = relay.snapshot(after: 0)
+
+        XCTAssertEqual(snapshot.settings.profileName, "Intro to Marketing")
+        XCTAssertEqual(snapshot.settings.uploadModeName, "Apple Vision")
+        XCTAssertEqual(snapshot.ocrPreview, frame)
     }
 
     func testGlassesRelayGroupsEveryQuestionFromOneUploadBatch() {

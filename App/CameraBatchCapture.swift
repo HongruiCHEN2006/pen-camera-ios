@@ -53,6 +53,7 @@ final class CameraBatchCapture {
 
     let directory: URL
     private(set) var images: [URL] = []
+    private(set) var ocrFrames: [AppleVisionOCRFrame] = []
     private(set) var byteCount = 0
     private var lastJPEG: Data?
 
@@ -100,6 +101,12 @@ final class CameraBatchCapture {
 
     func readImages() throws -> [Data] {
         try images.map { try Data(contentsOf: $0) }
+    }
+
+    func appendOCR(_ frame: AppleVisionOCRFrame) {
+        ocrFrames.removeAll { $0.frameIndex == frame.frameIndex }
+        ocrFrames.append(frame)
+        ocrFrames.sort { $0.frameIndex < $1.frameIndex }
     }
 
     func remove() throws {

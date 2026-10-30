@@ -28,6 +28,8 @@ struct GlassesQuestionEnvelope: Codable, Equatable, Sendable {
     let latestSequence: Int
     let camera: GlassesCameraStatusPayload
     let analysis: GlassesAnalysisStatusPayload
+    let settings: GlassesSettingsPayload
+    let ocrPreview: AppleVisionOCRFrame?
     let questions: [GlassesQuestionPayload]
 
     enum CodingKeys: String, CodingKey {
@@ -35,7 +37,23 @@ struct GlassesQuestionEnvelope: Codable, Equatable, Sendable {
         case latestSequence = "latest_sequence"
         case camera
         case analysis
+        case settings
+        case ocrPreview = "ocr_preview"
         case questions
+    }
+}
+
+struct GlassesSettingsPayload: Codable, Equatable, Sendable {
+    let profile: String
+    let profileName: String
+    let uploadMode: String
+    let uploadModeName: String
+
+    enum CodingKeys: String, CodingKey {
+        case profile
+        case profileName = "profile_name"
+        case uploadMode = "upload_mode"
+        case uploadModeName = "upload_mode_name"
     }
 }
 
@@ -98,6 +116,14 @@ final class GlassesRelayServer: @unchecked Sendable {
         uploadState: "not_started",
         imageCount: 0
     )
+    private var settings = GlassesSettingsPayload(
+        profile: AnalysisProfile.general.rawValue,
+        profileName: AnalysisProfile.general.displayName,
+        uploadMode: AnalysisUploadMode.images.rawValue,
+        uploadModeName: AnalysisUploadMode.images.displayName
+    )
+    private var ocrPreview: AppleVisionOCRFrame?
+    private var configurationChangeHandler: (@Sendable (AnalysisProfile?, AnalysisUploadMode?) -> Void)?
     private let encoder: JSONEncoder
 
     init() {
@@ -171,6 +197,8 @@ final class GlassesRelayServer: @unchecked Sendable {
                 latestSequence: nextSequence - 1,
                 camera: cameraStatus,
                 analysis: analysisStatus,
+                settings: settings,
+                ocrPreview: ocrPreview,
                 questions: questions.filter { $0.sequence > sequence }
             )
         }
@@ -195,6 +223,27 @@ final class GlassesRelayServer: @unchecked Sendable {
                 imageCount: max(0, imageCount)
             )
         }
+    }
+
+    func updateConfiguration(profile: AnalysisProfile, uploadMode: AnalysisUploadMode) {
+        lock.withLock {
+            settings = GlassesSettingsPayload(
+                profile: profile.rawValue,
+                profileName: profile.displayName,
+                uploadMode: uploadMode.rawValue,
+                uploadModeName: uploadMode.displayName
+            )
+        }
+    }
+
+    func setConfigurationChangeHandler(
+        _ handler: @escaping @Sendable (AnalysisProfile?, AnalysisUploadMode?) -> Void
+    ) {
+        lock.withLock { configurationChangeHandler = handler }
+    }
+
+    func updateOCRPreview(_ frame: AppleVisionOCRFrame?) {
+        lock.withLock { ocrPreview = frame }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -224,25 +273,66 @@ final class GlassesRelayServer: @unchecked Sendable {
             send(status: "204 No Content", body: Data(), on: connection)
             return
         }
-        guard method == "GET" else {
-            send(status: "405 Method Not Allowed", body: Data(), on: connection)
+        let target = String(components[1])
+        guard let url = URL(string: "http://localhost\(target)") else {
+            send(status: "400 Bad Request", body: Data(), on: connection)
             return
         }
 
-        let target = String(components[1])
-        guard let url = URL(string: "http://localhost\(target)"),
-              url.path == "/api/questions" else {
+        if method == "POST", url.path == "/api/settings/profile" {
+            guard let value = queryValue(named: "value", in: url),
+                  let profile = AnalysisProfile(rawValue: value) else {
+                send(status: "400 Bad Request", body: Data(), on: connection)
+                return
+            }
+            applyConfiguration(profile: profile, uploadMode: nil)
+            send(status: "204 No Content", body: Data(), on: connection)
+            return
+        }
+
+        if method == "POST", url.path == "/api/settings/upload-mode" {
+            guard let value = queryValue(named: "value", in: url),
+                  let uploadMode = AnalysisUploadMode(rawValue: value) else {
+                send(status: "400 Bad Request", body: Data(), on: connection)
+                return
+            }
+            applyConfiguration(profile: nil, uploadMode: uploadMode)
+            send(status: "204 No Content", body: Data(), on: connection)
+            return
+        }
+
+        guard method == "GET", url.path == "/api/questions" else {
             send(status: "404 Not Found", body: Data(), on: connection)
             return
         }
-        let after = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first(where: { $0.name == "after" })?.value
-            .flatMap(Int.init) ?? 0
+        let after = queryValue(named: "after", in: url).flatMap(Int.init) ?? 0
         do {
             send(status: "200 OK", body: try encoder.encode(snapshot(after: max(0, after))), on: connection)
         } catch {
             send(status: "500 Internal Server Error", body: Data(), on: connection)
         }
+    }
+
+    private func queryValue(named name: String, in url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value
+    }
+
+    private func applyConfiguration(
+        profile: AnalysisProfile?, uploadMode: AnalysisUploadMode?
+    ) {
+        let handler = lock.withLock { () -> (@Sendable (AnalysisProfile?, AnalysisUploadMode?) -> Void)? in
+            let currentProfile = profile ?? AnalysisProfile(rawValue: settings.profile) ?? .general
+            let currentMode = uploadMode ?? AnalysisUploadMode(rawValue: settings.uploadMode) ?? .images
+            settings = GlassesSettingsPayload(
+                profile: currentProfile.rawValue,
+                profileName: currentProfile.displayName,
+                uploadMode: currentMode.rawValue,
+                uploadModeName: currentMode.displayName
+            )
+            return configurationChangeHandler
+        }
+        handler?(profile, uploadMode)
     }
 
     private func send(status: String, body: Data, on connection: NWConnection) {
@@ -252,7 +342,7 @@ final class GlassesRelayServer: @unchecked Sendable {
         Content-Length: \(body.count)\r
         Cache-Control: no-store\r
         Access-Control-Allow-Origin: *\r
-        Access-Control-Allow-Methods: GET, OPTIONS\r
+        Access-Control-Allow-Methods: GET, POST, OPTIONS\r
         Access-Control-Allow-Headers: Content-Type\r
         Connection: close\r
         \r
