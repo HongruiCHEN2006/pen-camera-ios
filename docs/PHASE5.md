@@ -37,13 +37,19 @@ The header always shows the selected course profile, upload mode, and G2 app
 version. While a non-black batch is being captured, the viewport shows the image
 count and the latest Apple Vision `.accurate` English OCR result at an approximate
 version of its original normalized position. OCR runs once for every distinct JPEG
-saved by the existing one-second sampler. Black frames never run OCR.
+saved by the existing one-second sampler. In both upload modes, the G2 OCR preview
+is redrawn at most once every two seconds; all one-second OCR frames remain in the
+native batch. Black frames never run OCR.
 
 During black confirmation and upload, the viewport reports the current black-frame
 verdict, whether upload has started/finished, and the number of images collected.
-As soon as an answer batch is available, device/status text is hidden and only the
-quick answers followed by the complete questions and answers remain below the
-persistent configuration header.
+As soon as an answer batch is available, device/status and configuration text are
+hidden so only the quick answers followed by the complete questions and answers
+use the full display height.
+
+The configuration header is omitted from quick-answer and full-answer viewports so
+the complete G2 display height is available for answer text. It remains visible on
+idle, capture, OCR preview, upload-status, and settings views.
 
 `Images` mode sends the saved original JPEGs to OpenAI; OCR is preview-only.
 `Apple Vision` mode sends chronological OCR blocks with normalized positions and
@@ -59,7 +65,7 @@ confidence instead of image data. Both modes OCR the exact same saved screenshot
 
 ## Physical test
 
-1. Install native build `0.24.0` and the private `Pen-Camera-G2.ehpk` build.
+1. Install native build `0.25.0` and the private `Pen-Camera-G2.ehpk` build.
 2. Open **Pen Camera** from the glasses menu. Leave it waiting for the phone relay.
 3. On iPhone, join `Nax_5cf097da7367`, keep cellular data enabled, and open the native Pen Camera app.
 4. Start the live stream, then tap **Start G2 Analysis**.

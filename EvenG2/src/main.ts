@@ -13,7 +13,7 @@ import {
 import { paginate } from './paginate'
 import './style.css'
 
-const APP_VERSION = '0.7.0'
+const APP_VERSION = '0.8.0'
 const RELAY_BASE = 'http://127.0.0.1:8765'
 const RELAY_URL = `${RELAY_BASE}/api/questions`
 const BODY_WIDTH = 576
@@ -21,6 +21,7 @@ const BODY_HEIGHT = 288
 const BODY_PADDING = 4
 const HEADER_HEIGHT = 27
 const POLL_INTERVAL_MS = 750
+const OCR_PREVIEW_INTERVAL_MS = 2_000
 const MAX_LOCAL_QUESTIONS = 100
 const ARM_WINDOW_MS = 2_500
 
@@ -128,6 +129,7 @@ let settings: RelaySettings = {
   upload_mode_name: 'Images',
 }
 let ocrPreview: OCRFrame | null = null
+let lastOCRPreviewUpdateAt = 0
 let view: ViewKind = 'main'
 let pickerIndex = 0
 let scrollPosition = 0
@@ -261,10 +263,16 @@ function answerDocument(): string {
   return answers
 }
 
+function shouldShowHeader(): boolean {
+  if (view !== 'main' || questions.length === 0) return true
+  return analysisStatus.upload_state !== 'not_started' || analysisStatus.image_count > 0
+}
+
 function updateViewports(): void {
+  const reservedHeaderHeight = shouldShowHeader() ? HEADER_HEIGHT : 0
   viewports = paginate(answerDocument(), {
     width: BODY_WIDTH - BODY_PADDING * 2,
-    height: BODY_HEIGHT - BODY_PADDING * 2 - HEADER_HEIGHT,
+    height: BODY_HEIGHT - BODY_PADDING * 2 - reservedHeaderHeight,
   })
   scrollPosition = Math.min(Math.max(0, scrollPosition), viewports.length - 1)
 }
@@ -272,7 +280,7 @@ function updateViewports(): void {
 async function render(): Promise<void> {
   updateViewports()
   const viewport = viewports[scrollPosition] ?? '等待答案'
-  const body = `${header()}\n${viewport}`
+  const body = shouldShowHeader() ? `${header()}\n${viewport}` : viewport
   rendering = rendering.then(async () => {
     await bridge.textContainerUpgrade(new TextContainerUpgrade({
       containerID: 1,
@@ -412,11 +420,25 @@ async function poll(): Promise<void> {
     const cameraChanged = JSON.stringify(cameraStatus) !== JSON.stringify(payload.camera)
     const analysisChanged = JSON.stringify(analysisStatus) !== JSON.stringify(payload.analysis)
     const settingsChanged = JSON.stringify(settings) !== JSON.stringify(payload.settings)
-    const ocrChanged = JSON.stringify(ocrPreview) !== JSON.stringify(payload.ocr_preview ?? null)
+    const incomingOCRPreview = payload.ocr_preview ?? null
+    let ocrChanged = false
     cameraStatus = payload.camera
     analysisStatus = payload.analysis
     settings = payload.settings
-    ocrPreview = payload.ocr_preview ?? null
+    if (incomingOCRPreview === null) {
+      if (ocrPreview !== null) {
+        ocrPreview = null
+        ocrChanged = true
+      }
+      lastOCRPreviewUpdateAt = 0
+    } else if (JSON.stringify(ocrPreview) !== JSON.stringify(incomingOCRPreview)) {
+      const now = Date.now()
+      if (ocrPreview === null || now - lastOCRPreviewUpdateAt >= OCR_PREVIEW_INTERVAL_MS) {
+        ocrPreview = incomingOCRPreview
+        lastOCRPreviewUpdateAt = now
+        ocrChanged = true
+      }
+    }
 
     if (sessionID && payload.session_id !== sessionID) {
       sessionID = payload.session_id

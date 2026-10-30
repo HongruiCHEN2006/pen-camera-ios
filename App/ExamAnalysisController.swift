@@ -383,6 +383,8 @@ final class ExamAnalysisController: ObservableObject {
     private func uploadBatch(_ batch: CameraBatchCapture, sessionID: UUID) async {
         defer { try? batch.remove() }
         guard !batch.images.isEmpty, isCurrentSession(sessionID) else { return }
+        let selectedProfile = analysisProfile
+        let selectedUploadMode = uploadMode
         do {
             let key = try loadAPIKey()
             guard isCurrentSession(sessionID), !Task.isCancelled else { return }
@@ -392,8 +394,6 @@ final class ExamAnalysisController: ObservableObject {
             hasUploadFinished = false
             uploadOutcome = nil
             cloudRoute = .connecting
-            let selectedProfile = analysisProfile
-            let selectedUploadMode = uploadMode
             let result: ExamAnalysisResult
             switch selectedUploadMode {
             case .images:
@@ -434,17 +434,63 @@ final class ExamAnalysisController: ObservableObject {
             return
         } catch let error as CellularHTTPError {
             cloudRoute = .failed(error.localizedDescription)
-            markUploadFailed(error.localizedDescription, sessionID: sessionID)
+            markUploadFailed(
+                error, batch: batch, profile: selectedProfile,
+                uploadMode: selectedUploadMode, sessionID: sessionID
+            )
         } catch let error as OpenAIExamError {
             updateCloudRoute(after: error)
-            markUploadFailed(error.localizedDescription, sessionID: sessionID)
+            markUploadFailed(
+                error, batch: batch, profile: selectedProfile,
+                uploadMode: selectedUploadMode, sessionID: sessionID
+            )
         } catch {
-            markUploadFailed(error.localizedDescription, sessionID: sessionID)
+            markUploadFailed(
+                error, batch: batch, profile: selectedProfile,
+                uploadMode: selectedUploadMode, sessionID: sessionID
+            )
         }
     }
 
-    private func markUploadFailed(_ message: String, sessionID: UUID) {
+    private func markUploadFailed(
+        _ error: Error,
+        batch: CameraBatchCapture,
+        profile: AnalysisProfile,
+        uploadMode: AnalysisUploadMode,
+        sessionID: UUID
+    ) {
         guard isCurrentSession(sessionID), !Task.isCancelled else { return }
+        let message = error.localizedDescription
+        let nsError = error as NSError
+        let ocrBlockCount = batch.ocrFrames.reduce(0) { $0 + $1.blocks.count }
+        let emptyOCRFrameCount = batch.ocrFrames.filter(\.blocks.isEmpty).count
+        let firstOCRFrame = batch.ocrFrames.first?.frameIndex.description ?? "none"
+        let lastOCRFrame = batch.ocrFrames.last?.frameIndex.description ?? "none"
+        let userInfo = nsError.userInfo.isEmpty
+            ? "none"
+            : String(reflecting: nsError.userInfo)
+        print("""
+        [PenCamera][Upload Failed]
+        time: \(ISO8601DateFormatter().string(from: Date()))
+        session: \(sessionID.uuidString)
+        profile: \(profile.displayName) (\(profile.rawValue))
+        upload_mode: \(uploadMode.displayName) (\(uploadMode.rawValue))
+        model: \(model)
+        images: \(batch.images.count)
+        image_bytes: \(batch.byteCount)
+        ocr_frames: \(batch.ocrFrames.count)
+        ocr_blocks: \(ocrBlockCount)
+        empty_ocr_frames: \(emptyOCRFrameCount)
+        ocr_frame_range: \(firstOCRFrame)...\(lastOCRFrame)
+        request_started: \(hasUploadStarted)
+        cloud_route: \(cloudRoute.title)
+        error_type: \(String(reflecting: type(of: error)))
+        error_description: \(message)
+        error_debug: \(String(reflecting: error))
+        ns_error_domain: \(nsError.domain)
+        ns_error_code: \(nsError.code)
+        ns_error_user_info: \(userInfo)
+        """)
         continuousRequestInFlight = false
         hasUploadFinished = hasUploadStarted
         uploadOutcome = hasUploadStarted ? "失败" : "准备失败"
