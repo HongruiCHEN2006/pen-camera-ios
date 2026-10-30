@@ -417,10 +417,10 @@ final class ExamAnalysisController: ObservableObject {
 
     private func publishGlassesStatus() {
         let uploadState: String
-        if continuousRequestInFlight || continuousState == .uploading {
-            uploadState = "uploading"
-        } else if hasUploadFinished {
+        if let uploadOutcome {
             uploadState = uploadOutcome == "成功" ? "success" : "failed"
+        } else if continuousRequestInFlight || continuousState == .uploading {
+            uploadState = "uploading"
         } else if hasUploadStarted {
             uploadState = "started"
         } else {

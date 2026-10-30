@@ -13,7 +13,7 @@ import {
 import { paginate } from './paginate'
 import './style.css'
 
-const APP_VERSION = '0.5.0'
+const APP_VERSION = '0.6.0'
 const RELAY_URL = 'http://127.0.0.1:8765/api/questions'
 const BODY_WIDTH = 576
 const BODY_HEIGHT = 288
@@ -138,16 +138,16 @@ function answerDocument(): string {
     ? `相机：已连接${typeof cameraStatus.battery_level === 'number' ? ` · 电量 ${cameraStatus.battery_level}%` : ''}`
     : `相机：${cameraStatus.state === 'connecting' ? '连接中' : cameraStatus.state === 'reconnecting' ? '正在重连' : '未连接'}`
 
-  if (questions.length === 0) {
-    const blackLine = `黑屏：${typeof analysisStatus.is_black === 'boolean' ? (analysisStatus.is_black ? '是' : '否') : '待检测'}`
-    const uploadLabels: Record<AnalysisStatus['upload_state'], string> = {
-      not_started: '否',
-      started: '已开始',
-      uploading: '上传中',
-      success: '已完成',
-      failed: '失败',
-    }
-    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n${blackLine}\n上传：${uploadLabels[analysisStatus.upload_state]}\n共计：${analysisStatus.image_count} 张`
+  const showingUploadStatus = analysisStatus.upload_state !== 'not_started'
+  if (questions.length === 0 || showingUploadStatus) {
+    const isBlack = typeof analysisStatus.is_black === 'boolean'
+      ? (analysisStatus.is_black ? '是' : '否')
+      : '待检测'
+    const hasStarted = showingUploadStatus ? '是' : '否'
+    const hasFinished = analysisStatus.upload_state === 'success'
+      ? '是（成功）'
+      : analysisStatus.upload_state === 'failed' ? '是（失败）' : '否'
+    return `Pen Camera G2 v${APP_VERSION}\n${cameraLine}\n\n是否黑屏：${isBlack}\n开始上传：${hasStarted}\n结束上传：${hasFinished}\n共计图片：${analysisStatus.image_count} 张`
   }
 
   const answers = batchGroups().map((batch, batchIndex) => {

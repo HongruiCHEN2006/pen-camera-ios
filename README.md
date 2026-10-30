@@ -26,6 +26,11 @@ and the full display is reserved for compact quick answers followed by complete
 questions and answers. The right-temple app menu remains available; click then
 long-press on the left temple clears the locally displayed answers.
 
+While a batch is uploading, G2 temporarily prioritizes a four-line status view:
+black-frame verdict, upload started, upload finished (including success/failure),
+and the current batch image count. This status also appears over previously stored
+answers and returns to the answer document after the phone resets the upload cycle.
+
 These values describe the verified AP-mode setup. Native iOS TCP access, protocol handshake, JPEG reconstruction, live video, local capture, and simultaneous Wi-Fi/cellular split routing are verified on the physical phone.
 
 ## Build locally on macOS
